@@ -1,0 +1,44 @@
+========================================================
+  RUNNING STEP 6 EXPERIMENT: Replay Buffer = 5%
+========================================================
+
+--- PHASE 1: TRAINING ON GROUP A ---
+Phase 1 - Round 1/5 -> Group A Accuracy: 2.48%
+Phase 1 - Round 2/5 -> Group A Accuracy: 3.84%
+Phase 1 - Round 3/5 -> Group A Accuracy: 14.26%
+Phase 1 - Round 4/5 -> Group A Accuracy: 22.70%
+Phase 1 - Round 5/5 -> Group A Accuracy: 25.10%
+
+--- PHASE 2: TRAINING ON GROUP B (WITH 5% REPLAY BUFFER) ---
+Phase 2 - Round 1/5 -> Group A Accuracy: 0.04% | Group B Accuracy: 2.66%
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 4.56%
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 12.18%
+Phase 2 - Round 4/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 14.62%
+Phase 2 - Round 5/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 16.76%
+
+========================================================
+  RUNNING STEP 6 EXPERIMENT: Replay Buffer = 15%
+========================================================
+
+--- PHASE 1: TRAINING ON GROUP A ---
+Phase 1 - Round 1/5 -> Group A Accuracy: 2.08%
+Phase 1 - Round 2/5 -> Group A Accuracy: 4.82%
+Phase 1 - Round 3/5 -> Group A Accuracy: 15.32%
+Phase 1 - Round 4/5 -> Group A Accuracy: 23.20%
+Phase 1 - Round 5/5 -> Group A Accuracy: 25.10%
+
+--- PHASE 2: TRAINING ON GROUP B (WITH 15% REPLAY BUFFER) ---
+Phase 2 - Round 1/5 -> Group A Accuracy: 2.04% | Group B Accuracy: 0.96%
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 7.36%
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 11.16%
+Phase 2 - Round 4/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 16.66%
+Phase 2 - Round 5/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 20.50%
+
+======================================================================
+                    STEP 6 SUMMARY RESULTS
+======================================================================
+Replay Buffer Size   | Group A (Step 3)   | Group A (Step 4)   | Group B (Step 4)  
+--------------------------------------------------------------------------------
+5% Replay Buffer     |             25.10% |              0.00% |             16.76%
+15% Replay Buffer    |             25.10% |              0.00% |             20.50%
+======================================================================

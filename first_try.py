@@ -7,21 +7,21 @@ import numpy as np
 from flwr_datasets import FederatedDataset
 
 # ------------------------------------------------------------------
-# 1. Configuration Setup
+# 1. Konfigürasyon Yapısı (Dökümanın istediği Kolay Değiştirilebilir Yapı)
 # ------------------------------------------------------------------
 CONFIG = {
     "num_clients": 10,
     "batch_size": 32,
-    "local_epochs": 1,    # Number of local training epochs per client per round
-    "num_rounds": 5,      # Total number of Federated Learning rounds
+    "local_epochs": 1,    # Her client'ın tur başına yerel eğitim epoch sayısı
+    "num_rounds": 5,      # Federated Learning toplam tur sayısı (Test için 5-10 verebilirsin)
     "lr": 0.001,
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
 
-print(f"Device in use: {CONFIG['device']}")
+print(f"Çalışma Cihazı: {CONFIG['device']}")
 
 # ------------------------------------------------------------------
-# 2. Data Preparation & Filtering
+# 2. Veri Hazırlığı & Filtreleme
 # ------------------------------------------------------------------
 fds = FederatedDataset(
     dataset="uoft-cs/cifar100",
@@ -37,7 +37,7 @@ def filter_by_classes(partition, class_labels):
     return partition.filter(lambda example: example[label_col] in allowed_classes)
 
 def transform_batch(batch):
-    # Convert HuggingFace PIL images to PyTorch Tensors (3, 32, 32) and normalize to [0, 1]
+    # HuggingFace PIL resimlerini PyTorch Tensor formatına (3, 32, 32) ve 0-1 aralığına getirir
     images = [
         torch.tensor(np.array(img), dtype=torch.float32).permute(2, 0, 1) / 255.0 
         for img in batch["img"]
@@ -45,7 +45,7 @@ def transform_batch(batch):
     labels = torch.tensor(batch["fine_label"] if "fine_label" in batch else batch["label"], dtype=torch.long)
     return {"img": images, "label": labels}
 
-# Prepare Test Set for Group A evaluation
+# Test Setini Hazırla (Grup A Başarısını Ölçmek İçin)
 test_dataset = fds.load_split("test")
 test_group_a = filter_by_classes(test_dataset, group_a_classes)
 
@@ -61,17 +61,17 @@ test_loader = DataLoader(
 )
 
 # ------------------------------------------------------------------
-# 3. Model Architecture (ResNet-18, num_classes=100)
+# 3. Model Tanımı (ResNet-18, num_classes=100)
 # ------------------------------------------------------------------
 def get_model():
     model = resnet18(num_classes=100)
-    # Adapt the first conv layer for 32x32 CIFAR-100 images
+    # CIFAR-100 görselleri 32x32 olduğu için ResNet'in ilk katmanını CIFAR boyutuna uygun hale getiriyoruz
     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
     model.maxpool = nn.Identity()
     return model
 
 # ------------------------------------------------------------------
-# 4. Training and Evaluation Functions
+# 4. Eğitim ve Değerlendirme Fonksiyonları
 # ------------------------------------------------------------------
 def train_local(model, train_loader, epochs, lr, device):
     model.train()
@@ -103,17 +103,17 @@ def evaluate(model, test_loader, device):
     return correct / total if total > 0 else 0.0
 
 # ------------------------------------------------------------------
-# 5. Simulated FedAvg Process (Phase 1: Group A Only)
+# 5. Simulated FedAvg Süreci (Faz 1: Sadece Grup A)
 # ------------------------------------------------------------------
 global_model = get_model().to(CONFIG["device"])
 
-print("\n--- PHASE 1: TRAINING ON GROUP A STARTED ---")
+print("\n--- FAZ 1: GRUP A İLE EĞİTİM BAŞLIYOR ---")
 group_a_accuracies = []
 
 for r in range(CONFIG["num_rounds"]):
     local_weights = []
     
-    # Perform local training on each client using Group A data
+    # Her client kendi Grup A verisiyle yerel eğitim yapar
     for client_id in range(CONFIG["num_clients"]):
         client_partition = fds.load_partition(partition_id=client_id, split="train")
         client_group_a = filter_by_classes(client_partition, group_a_classes)
@@ -125,34 +125,35 @@ for r in range(CONFIG["num_rounds"]):
             collate_fn=collate_fn
         )
         
-        # Copy global model weights to client
+        # Global modeli client'a kopyala
         local_model = get_model().to(CONFIG["device"])
         local_model.load_state_dict(global_model.state_dict())
         
-        # Train locally
+        # Yerel eğitim yap
         w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
         local_weights.append(w)
     
-    # FedAvg: Weight Aggregation
+    # FedAvg: Ağırlıkları Ortalaması (Aggregation)
     avg_weights = {}
     for key in local_weights[0].keys():
-        # Save original data type (e.g., Long for num_batches_tracked)
+        # 1. İlk client'ın orijinal veri tipini sakla
         target_dtype = local_weights[0][key].dtype
 
-        # Cast tensors to float32 before computing the mean
+        # 2. Tensor'ları float'a çevirip ortalamasını al
         stacked_weights = torch.stack([w[key].to(torch.float32) for w in local_weights], dim=0)
         avg_tensor = stacked_weights.mean(dim=0)
 
-        # Convert back to target data type
+        # 3. Orijinal veri tipine (Long/Int vb.) geri döndür
         avg_weights[key] = avg_tensor.to(target_dtype)
 
+    
     global_model.load_state_dict(avg_weights)
     
-    # Evaluate Group A performance at the end of each round
+    # Tur sonu Grup A Başarısını Ölç
     acc = evaluate(global_model, test_loader, CONFIG["device"])
     group_a_accuracies.append(acc)
-    print(f"Round {r+1}/{CONFIG['num_rounds']} - Group A Accuracy: {acc * 100:.2f}%")
+    print(f"Round {r+1}/{CONFIG['num_rounds']} - Group A Accuracy: %{acc * 100:.2f}")
 
-# Save Baseline Model
+# Eğitilmiş Baseline Modeli Kaydet
 torch.save(global_model.state_dict(), "global_model_phase1.pt")
-print("\nPhase 1 Completed! Baseline model saved to 'global_model_phase1.pt'.")
+print("\nFaz 1 Tamamlandı! Model 'global_model_phase1.pt' olarak kaydedildi.")
