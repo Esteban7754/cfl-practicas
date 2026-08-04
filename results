@@ -1,0 +1,98 @@
+lah-MacBook-Air cfl % python step_six_v1.py 
+Device in use: mps
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+========================================================
+  RUNNING STEP 6 EXPERIMENT: Replay Buffer = 25%
+========================================================
+
+--- PHASE 1: TRAINING ON GROUP A ---
+Phase 1 - Round 1/5 -> Group A Accuracy: 2.24%
+Phase 1 - Round 2/5 -> Group A Accuracy: 4.30%
+Phase 1 - Round 3/5 -> Group A Accuracy: 16.66%
+Phase 1 - Round 4/5 -> Group A Accuracy: 23.04%
+Phase 1 - Round 5/5 -> Group A Accuracy: 25.44%
+
+--- PHASE 2: TRAINING ON GROUP B (WITH 25% REPLAY BUFFER) ---
+Phase 2 - Round 1/5 -> Group A Accuracy: 1.76% | Group B Accuracy: 0.86%
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 5.16%
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 12.04%
+Phase 2 - Round 4/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 15.80%
+Phase 2 - Round 5/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 19.22%
+
+========================================================
+  RUNNING STEP 6 EXPERIMENT: Replay Buffer = 50%
+========================================================
+
+--- PHASE 1: TRAINING ON GROUP A ---
+Phase 1 - Round 1/5 -> Group A Accuracy: 2.56%
+Phase 1 - Round 2/5 -> Group A Accuracy: 2.78%
+Phase 1 - Round 3/5 -> Group A Accuracy: 14.64%
+Phase 1 - Round 4/5 -> Group A Accuracy: 22.66%
+Phase 1 - Round 5/5 -> Group A Accuracy: 24.98%
+
+--- PHASE 2: TRAINING ON GROUP B (WITH 50% REPLAY BUFFER) ---
+Phase 2 - Round 1/5 -> Group A Accuracy: 3.02% | Group B Accuracy: 0.06%
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 6.02%
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.38% | Group B Accuracy: 14.48%
+Phase 2 - Round 4/5 -> Group A Accuracy: 1.40% | Group B Accuracy: 19.02%
+Phase 2 - Round 5/5 -> Group A Accuracy: 4.28% | Group B Accuracy: 23.30%
+
+======================================================================
+                    STEP 6 SUMMARY RESULTS
+======================================================================
+Replay Buffer Size   | Group A (Step 3)   | Group A (Step 4)   | Group B (Step 4)  
+--------------------------------------------------------------------------------
+5% Replay Buffer     |             25.44% |              0.00% |             19.22%
+15% Replay Buffer    |             24.98% |              4.28% |             23.30%
+======================================================================
+(venv) abdullah@abdullah-MacBook-Air cfl % python step_six_v1.py
+Device in use: mps
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+    "local_epochs": 5,
+
+========================================================
+  RUNNING STEP 6 EXPERIMENT: Replay Buffer = 5%
+========================================================
+
+--- PHASE 1: TRAINING ON GROUP A ---
+Phase 1 - Round 1/5 -> Group A Accuracy: 3.58%
+Phase 1 - Round 2/5 -> Group A Accuracy: 20.64%
+Phase 1 - Round 3/5 -> Group A Accuracy: 41.06%
+Phase 1 - Round 4/5 -> Group A Accuracy: 49.40%
+Phase 1 - Round 5/5 -> Group A Accuracy: 52.14%
+
+--- PHASE 2: TRAINING ON GROUP B (WITH 5% REPLAY BUFFER) ---
+Phase 2 - Round 1/5 -> Group A Accuracy: 3.34% | Group B Accuracy: 21.36%
+Phase 2 - Round 2/5 -> Group A Accuracy: 2.88% | Group B Accuracy: 47.96%
+Phase 2 - Round 3/5 -> Group A Accuracy: 3.72% | Group B Accuracy: 51.30%
+Phase 2 - Round 4/5 -> Group A Accuracy: 4.20% | Group B Accuracy: 53.06%
+Phase 2 - Round 5/5 -> Group A Accuracy: 4.54% | Group B Accuracy: 54.36%
+
+========================================================
+  RUNNING STEP 6 EXPERIMENT: Replay Buffer = 15%
+========================================================
+
+--- PHASE 1: TRAINING ON GROUP A ---
+Phase 1 - Round 1/5 -> Group A Accuracy: 2.92%
+Phase 1 - Round 2/5 -> Group A Accuracy: 19.74%
+Phase 1 - Round 3/5 -> Group A Accuracy: 40.76%
+Phase 1 - Round 4/5 -> Group A Accuracy: 49.34%
+Phase 1 - Round 5/5 -> Group A Accuracy: 52.16%
+
+--- PHASE 2: TRAINING ON GROUP B (WITH 15% REPLAY BUFFER) ---
+Phase 2 - Round 1/5 -> Group A Accuracy: 20.26% | Group B Accuracy: 32.92%
+Phase 2 - Round 2/5 -> Group A Accuracy: 17.50% | Group B Accuracy: 49.46%
+Phase 2 - Round 3/5 -> Group A Accuracy: 17.62% | Group B Accuracy: 52.82%
+Phase 2 - Round 4/5 -> Group A Accuracy: 18.54% | Group B Accuracy: 54.14%
+Phase 2 - Round 5/5 -> Group A Accuracy: 19.38% | Group B Accuracy: 54.58%
+
+======================================================================
+                    STEP 6 SUMMARY RESULTS
+======================================================================
+Replay Buffer Size   | Group A (Step 3)   | Group A (Step 4)   | Group B (Step 4)  
+--------------------------------------------------------------------------------
+5% Replay Buffer     |             52.14% |              4.54% |             54.36%
+15% Replay Buffer    |             52.16% |             19.38% |             54.58%
+======================================================================

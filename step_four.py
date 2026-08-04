@@ -13,7 +13,7 @@ CONFIG = {
     "num_clients": 10,
     "batch_size": 32,
     "local_epochs": 1,
-    "num_rounds": 5,      # Number of rounds for Phase 2
+    "num_rounds": 5,
     "lr": 0.001,
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
@@ -49,7 +49,7 @@ def collate_fn(batch):
     labels = torch.tensor([x["label"] for x in batch])
     return imgs, labels
 
-# Prepare Test Sets for both Group A and Group B
+# Prepare Test Loaders for Group A and Group B
 test_dataset = fds.load_split("test")
 
 test_group_a = filter_by_classes(test_dataset, group_a_classes)
@@ -68,7 +68,7 @@ test_loader_b = DataLoader(
 )
 
 # ------------------------------------------------------------------
-# 3. Model Architecture & Loading Phase 1 Checkpoint
+# 3. Model Architecture
 # ------------------------------------------------------------------
 def get_model():
     model = resnet18(num_classes=100)
@@ -77,10 +77,6 @@ def get_model():
     return model
 
 global_model = get_model().to(CONFIG["device"])
-
-# Load pre-trained weights from Phase 1
-global_model.load_state_dict(torch.load("global_model_phase1.pt", map_location=CONFIG["device"]))
-print("Successfully loaded 'global_model_phase1.pt'.")
 
 # ------------------------------------------------------------------
 # 4. Training and Evaluation Functions
@@ -115,19 +111,54 @@ def evaluate(model, test_loader, device):
     return correct / total if total > 0 else 0.0
 
 # ------------------------------------------------------------------
-# 5. Simulated FedAvg Process (Phase 2: Distribution Shift to Group B)
+# 5. PHASE 1: Training on Group A
 # ------------------------------------------------------------------
-print("\n--- PHASE 2: TRAINING ON GROUP B STARTED (DISTRIBUTION SHIFT) ---")
-
-# Initial evaluation before Phase 2 training
-initial_acc_a = evaluate(global_model, test_loader_a, CONFIG["device"])
-initial_acc_b = evaluate(global_model, test_loader_b, CONFIG["device"])
-print(f"Initial Baseline -> Group A Acc: {initial_acc_a * 100:.2f}%, Group B Acc: {initial_acc_b * 100:.2f}%\n")
+print("\n--- PHASE 1: TRAINING ON GROUP A STARTED ---")
 
 for r in range(CONFIG["num_rounds"]):
     local_weights = []
     
-    # Each client trains ONLY on Group B data
+    for client_id in range(CONFIG["num_clients"]):
+        client_partition = fds.load_partition(partition_id=client_id, split="train")
+        client_group_a = filter_by_classes(client_partition, group_a_classes)
+        
+        train_loader = DataLoader(
+            client_group_a.with_transform(transform_batch), 
+            batch_size=CONFIG["batch_size"], 
+            shuffle=True, 
+            collate_fn=collate_fn
+        )
+        
+        local_model = get_model().to(CONFIG["device"])
+        local_model.load_state_dict(global_model.state_dict())
+        
+        w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
+        local_weights.append(w)
+    
+    # FedAvg Aggregation
+    avg_weights = {}
+    for key in local_weights[0].keys():
+        target_dtype = local_weights[0][key].dtype
+        stacked_weights = torch.stack([w[key].to(torch.float32) for w in local_weights], dim=0)
+        avg_tensor = stacked_weights.mean(dim=0)
+        avg_weights[key] = avg_tensor.to(target_dtype)
+
+    global_model.load_state_dict(avg_weights)
+    
+    acc_a = evaluate(global_model, test_loader_a, CONFIG["device"])
+    print(f"Phase 1 - Round {r+1}/{CONFIG['num_rounds']} -> Group A Accuracy: {acc_a * 100:.2f}%")
+
+# Save Phase 1 Checkpoint
+torch.save(global_model.state_dict(), "global_model_phase1.pt")
+
+# ------------------------------------------------------------------
+# 6. PHASE 2: Training on Group B (Sequential Shift)
+# ------------------------------------------------------------------
+print("\n--- PHASE 2: TRAINING ON GROUP B STARTED ---")
+
+for r in range(CONFIG["num_rounds"]):
+    local_weights = []
+    
     for client_id in range(CONFIG["num_clients"]):
         client_partition = fds.load_partition(partition_id=client_id, split="train")
         client_group_b = filter_by_classes(client_partition, group_b_classes)
@@ -159,8 +190,8 @@ for r in range(CONFIG["num_rounds"]):
     acc_a = evaluate(global_model, test_loader_a, CONFIG["device"])
     acc_b = evaluate(global_model, test_loader_b, CONFIG["device"])
     
-    print(f"Round {r+1}/{CONFIG['num_rounds']} -> Group A Acc (Forgotten): {acc_a * 100:.2f}% | Group B Acc (New): {acc_b * 100:.2f}%")
+    print(f"Phase 2 - Round {r+1}/{CONFIG['num_rounds']} -> Group A Accuracy: {acc_a * 100:.2f}% | Group B Accuracy: {acc_b * 100:.2f}%")
 
-# Save Phase 2 Model
+# Save Phase 2 Checkpoint
 torch.save(global_model.state_dict(), "global_model_phase2.pt")
-print("\nPhase 2 Completed! Shifted model saved to 'global_model_phase2.pt'.")
+print("\nAll Training Phases Completed Successfully!")
