@@ -1,0 +1,14 @@
+VALIDATION: prueba piloto; aprendizaje mínimo, clases cubiertas y entrenamiento controlado.
+Device in use: cpu
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:31:28 2026).
+
+========================================================
+  PHASE 1: TRAINING ON GROUP A (ONCE FOR ALL EXPERIMENTS)
+========================================================
+[INFO] Fase A reutilizada de: /workspace/resultados/cifar100_auditoria_2026-10-02/instrumentada/audit_phase1.pt
+[INFO] Precisión A antes de comparar replay: 2.50%
+Traceback (most recent call last):
+  File "/workspace/cifar100_three_buffer.py", line 339, in <module>
+    raise RuntimeError(validation_status["reason"])
+RuntimeError: Aprendizaje insuficiente en A; se cancela la comparación de replay

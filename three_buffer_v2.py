@@ -7,8 +7,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision.models import resnet18
 import numpy as np
-import matplotlib.pyplot as plt
 from flwr_datasets import FederatedDataset
+from reproducibility import seed_everything
+from experiment_common import (build_parser, apply_args, nested_buffer_indices, step_budget,
+                               make_result, print_table, save_results_csv, plot_loss)
 
 # ------------------------------------------------------------------
 # 1. Configuration Setup
@@ -19,9 +21,16 @@ CONFIG = {
     "local_epochs": 5,
     "num_rounds": 5,
     "lr": 0.001,
+    "seed": 42,
+    "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
 
+parser = build_parser("CIFAR-100: fase A una vez y comparación de buffers desde los mismos pesos")
+args = parser.parse_args()
+apply_args(args, CONFIG, parser)
+
+seed_everything(CONFIG["seed"])
 print(f"Device in use: {CONFIG['device']}")
 
 # ------------------------------------------------------------------
@@ -29,7 +38,9 @@ print(f"Device in use: {CONFIG['device']}")
 # ------------------------------------------------------------------
 fds = FederatedDataset(
     dataset="uoft-cs/cifar100",
+    revision=CONFIG["dataset_revision"],
     partitioners={"train": CONFIG["num_clients"]},
+    seed=CONFIG["seed"],
 )
 
 group_a_classes = list(range(0, 50))
@@ -80,11 +91,11 @@ def get_model():
     model.maxpool = nn.Identity()
     return model
 
-def train_local(model, train_loader, epochs, lr, device):
+def train_local(model, train_loader, epochs, lr, device, max_steps=None):
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
-    
+    steps = 0
     for _ in range(epochs):
         for imgs, labels in train_loader:
             imgs, labels = imgs.to(device), labels.to(device)
@@ -93,7 +104,9 @@ def train_local(model, train_loader, epochs, lr, device):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-            
+            steps += 1
+            if max_steps is not None and steps >= max_steps:
+                return model.state_dict()
     return model.state_dict()
 
 def evaluate(model, test_loader, device):
@@ -167,9 +180,12 @@ base_acc_a = evaluate(global_model, test_loader_a, CONFIG["device"]) * 100
 # ------------------------------------------------------------------
 # 5. PHASE 2: Runner Function for Replay Buffer Experiments
 # ------------------------------------------------------------------
-def run_phase2_experiment(replay_fraction):
+def run_phase2_experiment(replay_percent):
+    replay_fraction = replay_percent / 100
+    # Misma semilla al empezar cada variante: el orden de ejecución no influye.
+    seed_everything(CONFIG["seed"])
     print(f"\n========================================================")
-    print(f"  RUNNING PHASE 2: Replay Buffer = {int(replay_fraction * 100)}%")
+    print(f"  RUNNING PHASE 2: Replay Buffer = {replay_percent}%")
     print(f"========================================================")
 
     # Initialize model with saved Phase 1 weights
@@ -180,12 +196,8 @@ def run_phase2_experiment(replay_fraction):
     client_replay_buffers = {}
     for client_id in range(CONFIG["num_clients"]):
         client_group_a = client_group_a_datasets[client_id]
-        buffer_size = int(len(client_group_a) * replay_fraction)
-        if buffer_size > 0:
-            shuffled_indices = np.random.choice(len(client_group_a), size=buffer_size, replace=False)
-            client_replay_buffers[client_id] = client_group_a.select(shuffled_indices)
-        else:
-            client_replay_buffers[client_id] = None
+        indices = nested_buffer_indices(len(client_group_a), replay_fraction, CONFIG["seed"], client_id)
+        client_replay_buffers[client_id] = client_group_a.select(indices) if indices else None
 
     # --- Training on Group B + Mixed Replay Buffer ---
     for r in range(CONFIG["num_rounds"]):
@@ -212,7 +224,8 @@ def run_phase2_experiment(replay_fraction):
             local_model = get_model().to(CONFIG["device"])
             local_model.load_state_dict(global_model.state_dict())
             
-            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
+            max_steps = step_budget(len(client_group_b), CONFIG["batch_size"], CONFIG["local_epochs"], CONFIG["equal_steps"])
+            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"], max_steps=max_steps)
             local_weights.append(w)
         
         # FedAvg Aggregation
@@ -235,65 +248,18 @@ def run_phase2_experiment(replay_fraction):
 
     clear_memory()
 
-    return {
-        "fraction": f"{int(replay_fraction * 100)}%",
-        "step3_acc_a": base_acc_a,
-        "step4_acc_a": acc_a_after_step4,
-        "step4_acc_b": acc_b_after_step4,
-        "loss_a": base_acc_a - acc_a_after_step4
-    }
+    buffer_total = sum(len(b) for b in client_replay_buffers.values() if b is not None)
+    return make_result(replay_percent, base_acc_a, acc_a_after_step4, acc_b_after_step4,
+                       buffer_samples=buffer_total, seed=CONFIG["seed"], equal_steps=CONFIG["equal_steps"])
 
 # ------------------------------------------------------------------
-# 6. Execute Experiments (%5, %15, %25)
+# 6. Execute Experiments. 0 % (sin replay) se MIDE como el resto.
 # ------------------------------------------------------------------
-results_5pct = run_phase2_experiment(0.05)
-results_15pct = run_phase2_experiment(0.15)
-results_25pct = run_phase2_experiment(0.25)
-
-# Baseline (No Replay) Values from Step 5
-baseline_results = {
-    "fraction": "No Replay",
-    "step3_acc_a": base_acc_a,
-    "step4_acc_a": 0.00,
-    "step4_acc_b": 20.66,
-    "loss_a": base_acc_a
-}
-
-all_results = [baseline_results, results_5pct, results_15pct, results_25pct]
+all_results = [run_phase2_experiment(percent) for percent in args.buffers]
 
 # ------------------------------------------------------------------
-# 7. Summary Table Display
+# 7. Summary Table, CSV and Chart
 # ------------------------------------------------------------------
-print("\n" + "="*90)
-print("                    FINAL COMPARISON TABLE (STEP 7)")
-print("="*90)
-print(f"{'Method':<20} | {'Group A (Before)':<18} | {'Group A (After)':<18} | {'Group B (After)':<18} | {'Accuracy Loss':<15}")
-print("-" * 95)
-for res in all_results:
-    print(f"{res['fraction']:<20} | {res['step3_acc_a']:>17.2f}% | {res['step4_acc_a']:>17.2f}% | {res['step4_acc_b']:>17.2f}% | {res['loss_a']:>14.2f}%")
-print("="*90)
-
-# ------------------------------------------------------------------
-# 8. Plot & Save Chart
-# ------------------------------------------------------------------
-methods = [res['fraction'] for res in all_results]
-accuracy_losses = [res['loss_a'] for res in all_results]
-colors = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6']
-
-plt.figure(figsize=(9, 5.5), dpi=300)
-bars = plt.bar(methods, accuracy_losses, color=colors, width=0.45, edgecolor='black', linewidth=1)
-
-plt.title('Group A Accuracy Loss Across All Methods', fontsize=14, fontweight='bold', pad=15)
-plt.xlabel('Method', fontsize=12, labelpad=10)
-plt.ylabel('Accuracy Loss (%)', fontsize=12, labelpad=10)
-plt.ylim(0, max(accuracy_losses) + 5 if len(accuracy_losses) > 0 else 30)
-plt.grid(axis='y', linestyle='--', alpha=0.5)
-
-for bar in bars:
-    yval = bar.get_height()
-    plt.text(bar.get_x() + bar.get_width() / 2.0, yval + 0.7, f'{yval:.2f}%', ha='center', va='bottom', fontweight='bold')
-
-plt.tight_layout()
-plt.savefig('group_a_accuracy_loss_all_buffers.png', dpi=300)
-print("\n[INFO] Chart successfully saved as 'group_a_accuracy_loss_all_buffers.png'")
-plt.show()
+print_table("FINAL COMPARISON TABLE (STEP 7)", all_results)
+save_results_csv(all_results)
+plot_loss(all_results, "group_a_accuracy_loss_all_buffers.png", "Group A Accuracy Loss Across All Methods")

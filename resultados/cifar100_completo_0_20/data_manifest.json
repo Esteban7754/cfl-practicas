@@ -1,0 +1,55 @@
+{
+  "clients": [
+    {
+      "client": 0,
+      "a_samples": 2494,
+      "b_samples": 2506
+    },
+    {
+      "client": 1,
+      "a_samples": 2519,
+      "b_samples": 2481
+    },
+    {
+      "client": 2,
+      "a_samples": 2516,
+      "b_samples": 2484
+    },
+    {
+      "client": 3,
+      "a_samples": 2477,
+      "b_samples": 2523
+    },
+    {
+      "client": 4,
+      "a_samples": 2526,
+      "b_samples": 2474
+    },
+    {
+      "client": 5,
+      "a_samples": 2498,
+      "b_samples": 2502
+    },
+    {
+      "client": 6,
+      "a_samples": 2484,
+      "b_samples": 2516
+    },
+    {
+      "client": 7,
+      "a_samples": 2518,
+      "b_samples": 2482
+    },
+    {
+      "client": 8,
+      "a_samples": 2456,
+      "b_samples": 2544
+    },
+    {
+      "client": 9,
+      "a_samples": 2512,
+      "b_samples": 2488
+    }
+  ],
+  "total_a_samples": 25000
+}

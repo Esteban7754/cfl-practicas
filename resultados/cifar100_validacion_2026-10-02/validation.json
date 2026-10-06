@@ -1,0 +1,7 @@
+{
+  "comparison_valid": false,
+  "profile": "validation",
+  "reason": "Piloto inconcluyente: solo 12% de precisión en entrenamiento B sin replay y 0/200 aciertos en las imágenes del buffer al 20%. Los controles iniciales eran insuficientes.",
+  "base_accuracy_a_percent": 27.200000000000003,
+  "reviewed_with": "batchnorm_diagnostics.json"
+}

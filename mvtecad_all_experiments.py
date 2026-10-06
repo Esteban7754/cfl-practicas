@@ -10,11 +10,13 @@ from torchvision.models import resnet18
 import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
-import matplotlib.pyplot as plt
+from reproducibility import seed_everything
+from experiment_common import (build_parser, apply_args, nested_buffer_indices, step_budget,
+                               make_result, print_table, save_results_csv, plot_loss)
 
 CONFIG = {
-    # MVTec AD dataset directory path:
-    "data_dir": "/Users/abdullah/Downloads/mvtec_anomaly_detection", 
+    # Dataset root stored beside this script for portable, repeatable runs.
+    "data_dir": os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "mvtec_anomaly_detection"),
     "num_clients": 10,
     "batch_size": 32,
     "local_epochs": 5,
@@ -22,9 +24,19 @@ CONFIG = {
     "lr": 0.001,
     "img_size": 64,  # Fast ResNet training size
     "num_classes": 15,
+    "seed": 42,
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
 
+parser = build_parser("MVTec AD: 7 categorías (A) y luego 8 (B) con distintos buffers")
+args = parser.parse_args()
+if not os.path.exists(CONFIG["data_dir"]):
+    print(f"\n[WARNING] '{CONFIG['data_dir']}' directory not found!")
+    print("Extract the MVTec AD dataset so its 15 category folders are inside this directory.")
+    raise SystemExit(1)
+apply_args(args, CONFIG, parser)
+
+seed_everything(CONFIG["seed"])
 print(f"Device in use: {CONFIG['device']}")
 
 # 15 Industrial Categories in MVTec AD
@@ -93,11 +105,12 @@ def get_model():
     model.maxpool = nn.Identity()
     return model
 
-def train_local(model, train_loader, epochs, lr, device):
+def train_local(model, train_loader, epochs, lr, device, max_steps=None):
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
+    steps = 0
     for _ in range(epochs):
         for imgs, labels in train_loader:
             imgs, labels = imgs.to(device), labels.to(device)
@@ -106,6 +119,9 @@ def train_local(model, train_loader, epochs, lr, device):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            steps += 1
+            if max_steps is not None and steps >= max_steps:
+                return model.state_dict()
 
     return model.state_dict()
 
@@ -188,49 +204,8 @@ def calculate_avg_client_storage(buffer_dict):
         
     return float(np.mean(disk_mb_list)), float(np.mean(tensor_mb_list))
 
-def print_table(title, results_list):
-    print("\n" + "="*120)
-    print(f"                    {title}")
-    print("="*120)
-    print(f"{'Method':<12} | {'Group A (Before)':<18} | {'Group A (After)':<18} | {'Group B (After)':<18} | {'Group A Loss':<12} | {'Storage / Client (Disk / Tensor)':<30}")
-    print("-" * 120)
-    for res in results_list:
-        storage_str = f"{res['disk_mb']:.2f} MB / {res['tensor_mb']:.2f} MB"
-        print(f"{res['fraction']:<12} | {res['p1_acc_a']:>17.2f}% | {res['p2_acc_a']:>17.2f}% | {res['p2_acc_b']:>17.2f}% | {res['loss_a']:>11.2f}% | {storage_str:>30}")
-    print("="*120)
-
-def plot_and_save_chart(results_list, filename, title_text):
-    methods = [res['fraction'] for res in results_list]
-    loss_a = [res['loss_a'] for res in results_list]
-    colors = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6'][:len(results_list)]
-
-    plt.figure(figsize=(9, 5.5), dpi=300)
-    bars = plt.bar(methods, loss_a, color=colors, width=0.45, edgecolor='black', linewidth=1)
-
-    plt.title(title_text, fontsize=13, fontweight='bold', pad=15)
-    plt.xlabel('Replay Buffer Size', fontsize=11, labelpad=10)
-    plt.ylabel('Group A Accuracy Loss (%)', fontsize=11, labelpad=10)
-    plt.ylim(0, max(loss_a) + 15 if len(loss_a) > 0 and max(loss_a) > 0 else 50)
-    plt.grid(axis='y', linestyle='--', alpha=0.5)
-
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2.0, yval + 0.8, f'{yval:.2f}%', ha='center', va='bottom', fontweight='bold')
-
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    print(f"\n[INFO] Chart saved as '{filename}'")
-    try:
-        plt.show()
-    except Exception:
-        pass
-
 print(f"\n[INFO] Loading MVTec AD dataset from '{CONFIG['data_dir']}'...")
 
-if not os.path.exists(CONFIG["data_dir"]):
-    print(f"\n[WARNING] '{CONFIG['data_dir']}' directory not found!")
-    print("Please set CONFIG['data_dir'] to the extracted MVTec AD folder path.")
-    exit(1)
 
 # Training Subsets
 train_group_a = MVTecDataset(CONFIG["data_dir"], group_a_classes, is_train=True, transform=transform)
@@ -281,9 +256,11 @@ for r in range(CONFIG["num_rounds"]):
 base_phase1_weights = copy.deepcopy(global_model.state_dict())
 base_acc_a = evaluate(global_model, test_loader_a, CONFIG["device"]) * 100
 
-def run_continual_experiment(replay_fraction):
+def run_continual_experiment(replay_percent):
+    replay_fraction = replay_percent / 100
+    seed_everything(CONFIG["seed"])  # misma semilla en todas las variantes
     print(f"\n========================================================")
-    print(f"  RUNNING CONTINUAL EXPERIMENT: Replay Buffer = {int(replay_fraction * 100)}%")
+    print(f"  RUNNING CONTINUAL EXPERIMENT: Replay Buffer = {replay_percent}%")
     print(f"========================================================")
 
     global_model = get_model().to(CONFIG["device"])
@@ -295,9 +272,8 @@ def run_continual_experiment(replay_fraction):
     if replay_fraction > 0:
         for client_id in range(CONFIG["num_clients"]):
             client_data_a = client_a_partitions[client_id]
-            size_a = int(len(client_data_a) * replay_fraction)
-            if size_a > 0:
-                idx_a = np.random.choice(len(client_data_a), size=size_a, replace=False)
+            idx_a = nested_buffer_indices(len(client_data_a), replay_fraction, CONFIG["seed"], client_id)
+            if idx_a:
                 buffer_a[client_id] = Subset(client_data_a, idx_a)
 
     # EXTRA E: Measure average storage cost per client (Disk MB and Tensor MB)
@@ -311,13 +287,14 @@ def run_continual_experiment(replay_fraction):
             client_data_b = client_b_partitions[client_id]
             rep_a = buffer_a.get(client_id, None)
 
-            train_ds = ConcatDataset([client_data_b, rep_a]) if rep_a else client_data_b
+            train_ds = ConcatDataset([client_data_b, rep_a]) if rep_a is not None else client_data_b
             train_loader = DataLoader(train_ds, batch_size=CONFIG["batch_size"], shuffle=True)
 
             local_model = get_model().to(CONFIG["device"])
             local_model.load_state_dict(global_model.state_dict())
 
-            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
+            max_steps = step_budget(len(client_data_b), CONFIG["batch_size"], CONFIG["local_epochs"], CONFIG["equal_steps"])
+            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"], max_steps=max_steps)
             local_weights.append(w)
 
         # FedAvg
@@ -337,26 +314,18 @@ def run_continual_experiment(replay_fraction):
 
     clear_memory()
 
-    return {
-        "fraction": f"{int(replay_fraction * 100)}%" if replay_fraction > 0 else "No Replay",
-        "p1_acc_a": base_acc_a,
-        "p2_acc_a": acc_a_end,
-        "p2_acc_b": acc_b_end,
-        "loss_a": base_acc_a - acc_a_end,
-        "disk_mb": disk_mb,
-        "tensor_mb": tensor_mb
-    }
+    buffer_total = sum(len(b) for b in buffer_a.values())
+    return make_result(replay_percent, base_acc_a, acc_a_end, acc_b_end,
+                       buffer_samples=buffer_total, disk_mb=disk_mb, tensor_mb=tensor_mb,
+                       seed=CONFIG["seed"], equal_steps=CONFIG["equal_steps"])
 
-results_0pct = run_continual_experiment(0.00)
-results_5pct = run_continual_experiment(0.05)
-results_15pct = run_continual_experiment(0.15)
+all_results = [run_continual_experiment(percent) for percent in args.buffers]
+up_to_20 = [r for r in all_results if r["replay_percent"] <= 20]
 
-results_stage_1 = [results_0pct, results_5pct, results_15pct]
-print_table("INTERMEDIATE TABLE 1 (MVTEC AD - AFTER 5% & 15% REPLAY)", results_stage_1)
-plot_and_save_chart(results_stage_1, "mvtec_continual_loss_5_15.png", "MVTec AD Group A Accuracy Loss (No Replay vs 5% & 15%)")
-
-results_25pct = run_continual_experiment(0.25)
-
-results_stage_2 = [results_0pct, results_5pct, results_15pct, results_25pct]
-print_table("FINAL COMPARISON TABLE 2 (MVTEC AD - ALL RESULTS WITH EXTRA E)", results_stage_2)
-plot_and_save_chart(results_stage_2, "mvtec_continual_loss_all.png", "MVTec AD Group A Accuracy Loss Across All Buffer Sizes")
+print_table("FINAL COMPARISON TABLE (MVTEC AD)", all_results)
+print("Coste medio de almacenamiento por cliente (disco / tensores):")
+for r in all_results:
+    print(f"  {r['fraction']:<10} {r['disk_mb']:.2f} MB / {r['tensor_mb']:.2f} MB")
+save_results_csv(all_results)
+plot_loss(up_to_20, "mvtec_continual_loss_up_to_20.png", "MVTec AD Group A Accuracy Loss (buffers up to 20%)", xlabel="Replay Buffer Size")
+plot_loss(all_results, "mvtec_continual_loss_all.png", "MVTec AD Group A Accuracy Loss Across All Buffer Sizes", xlabel="Replay Buffer Size")

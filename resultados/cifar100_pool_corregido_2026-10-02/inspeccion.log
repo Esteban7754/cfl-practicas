@@ -1,0 +1,87 @@
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:55:49 2026).
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 2000/10000 [00:00<00:00, 11832.36 examples/s]
+Filter:  40%|████      | 4000/10000 [00:00<00:00, 13005.66 examples/s]
+Filter:  60%|██████    | 6000/10000 [00:00<00:00, 13124.27 examples/s]
+Filter:  80%|████████  | 8000/10000 [00:00<00:00, 9249.52 examples/s] 
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 10505.56 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 10810.96 examples/s]
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 2000/10000 [00:00<00:00, 12462.89 examples/s]
+Filter:  40%|████      | 4000/10000 [00:00<00:00, 12735.28 examples/s]
+Filter:  60%|██████    | 6000/10000 [00:00<00:00, 12978.35 examples/s]
+Filter:  80%|████████  | 8000/10000 [00:00<00:00, 12970.24 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 12964.16 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 12860.22 examples/s]
+{
+  "train_total": 50000,
+  "test_total": 10000,
+  "train_a": 25000,
+  "train_b": 25000,
+  "previous_pilot_a_pool": 1000,
+  "previous_pilot_replay_images": 200,
+  "previous_pilot_effective_fraction_of_full_a": 0.008,
+  "test_a": 5000,
+  "test_b": 5000,
+  "checkpoint_sha256": "4d98d450f61031ff29d1642d20227e5453ef2e5dc122893e1aed051ac22c5a77",
+  "full_test_a": {
+    "correct": 1344,
+    "total": 5000,
+    "accuracy_percent": 26.88,
+    "prediction_counts": {
+      "31": 233,
+      "20": 224,
+      "36": 162,
+      "48": 116,
+      "21": 339,
+      "44": 76,
+      "33": 135,
+      "14": 81,
+      "43": 246,
+      "22": 74,
+      "34": 48,
+      "37": 142,
+      "12": 113,
+      "40": 5,
+      "3": 106,
+      "27": 220,
+      "17": 162,
+      "41": 68,
+      "38": 88,
+      "0": 191,
+      "5": 74,
+      "42": 94,
+      "1": 161,
+      "46": 92,
+      "15": 41,
+      "28": 175,
+      "18": 101,
+      "29": 26,
+      "16": 59,
+      "23": 186,
+      "13": 62,
+      "2": 121,
+      "9": 104,
+      "49": 102,
+      "24": 191,
+      "8": 47,
+      "7": 77,
+      "30": 103,
+      "4": 42,
+      "45": 62,
+      "47": 101,
+      "6": 71,
+      "32": 16,
+      "35": 9,
+      "26": 25,
+      "25": 4,
+      "39": 17,
+      "19": 8
+    },
+    "predictions_group_a": 5000,
+    "predictions_group_b": 0
+  }
+}

@@ -1,0 +1,8 @@
+# Finales de línea coherentes: los .py y .md mezclaban CRLF y LF y el diff de git mostraba archivos enteros cambiados.
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.pt binary

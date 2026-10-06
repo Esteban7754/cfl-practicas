@@ -1,0 +1,3 @@
+fraction,step3_acc_a,step4_acc_a,step4_acc_b,loss_a
+No Replay,26.88,0.0,21.959999999999997,26.88
+20% Replay,26.88,0.0,19.64,26.88

@@ -1,0 +1,33 @@
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:13:17 2026).
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 2000/10000 [00:00<00:00, 12619.97 examples/s]
+Filter:  40%|████      | 4000/10000 [00:00<00:00, 13488.19 examples/s]
+Filter:  60%|██████    | 6000/10000 [00:00<00:00, 13026.24 examples/s]
+Filter:  80%|████████  | 8000/10000 [00:00<00:00, 7778.29 examples/s] 
+Filter: 100%|██████████| 10000/10000 [00:01<00:00, 8957.57 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:01<00:00, 9605.31 examples/s]
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 2000/10000 [00:00<00:00, 11248.81 examples/s]
+Filter:  40%|████      | 4000/10000 [00:00<00:00, 12507.94 examples/s]
+Filter:  60%|██████    | 6000/10000 [00:00<00:00, 13084.58 examples/s]
+Filter:  80%|████████  | 8000/10000 [00:00<00:00, 13195.00 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 13074.95 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 12862.65 examples/s]
+phase1 {"A": {"correct": 3, "total": 100, "accuracy_percent": 3.0, "prediction_counts": {"23": 74, "27": 25, "30": 1}, "predictions_group_a": 100, "predictions_group_b": 0}, "B": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"27": 30, "23": 70}, "predictions_group_a": 100, "predictions_group_b": 0}}
+phase2_0 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 47, "95": 51, "53": 2}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 1, "total": 100, "accuracy_percent": 1.0, "prediction_counts": {"95": 55, "67": 39, "53": 6}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_5 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"88": 50, "67": 26, "95": 14, "76": 9, "80": 1}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"95": 21, "88": 51, "89": 3, "76": 7, "67": 17, "55": 1}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_10 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 97, "76": 3}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 1, "total": 100, "accuracy_percent": 1.0, "prediction_counts": {"67": 95, "76": 5}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_15 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"53": 38, "61": 50, "23": 1, "76": 11}, "predictions_group_a": 1, "predictions_group_b": 99}, "B": {"correct": 6, "total": 100, "accuracy_percent": 6.0, "prediction_counts": {"76": 26, "61": 41, "53": 33}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_20 {"A": {"correct": 1, "total": 100, "accuracy_percent": 1.0, "prediction_counts": {"67": 75, "99": 18, "30": 5, "54": 2}, "predictions_group_a": 5, "predictions_group_b": 95}, "B": {"correct": 1, "total": 100, "accuracy_percent": 1.0, "prediction_counts": {"99": 20, "67": 74, "80": 1, "88": 3, "30": 2}, "predictions_group_a": 2, "predictions_group_b": 98}}
+phase2_25 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 92, "95": 5, "49": 3}, "predictions_group_a": 3, "predictions_group_b": 97}, "B": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"95": 8, "67": 86, "27": 4, "49": 2}, "predictions_group_a": 6, "predictions_group_b": 94}}
+Traceback (most recent call last):
+  File "/workspace/verificar_cifar100.py", line 157, in <module>
+    main()
+    ~~~~^^
+  File "/workspace/verificar_cifar100.py", line 96, in main
+    assert abs(float(row[key]) - value) < 1e-10, (pct, key, row[key], value)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: (0, 'step3_acc_a', '2.0', 3.0)

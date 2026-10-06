@@ -6,8 +6,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision.models import resnet18
 import numpy as np
-import matplotlib.pyplot as plt
 from flwr_datasets import FederatedDataset
+from reproducibility import seed_everything
+from experiment_common import (build_parser, apply_args, nested_buffer_indices, step_budget,
+                               make_result, print_table, save_results_csv, plot_loss)
 
 # ------------------------------------------------------------------
 # 1. Configuration Setup
@@ -18,9 +20,16 @@ CONFIG = {
     "local_epochs": 5,
     "num_rounds": 5,
     "lr": 0.001,
+    "seed": 42,
+    "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
 
+parser = build_parser("CIFAR-100: fase A y fase B repetidas para cada buffer", default_buffers=[0, 5, 10, 15, 20, 25])
+args = parser.parse_args()
+apply_args(args, CONFIG, parser)
+
+seed_everything(CONFIG["seed"])
 print(f"Device in use: {CONFIG['device']}")
 
 # ------------------------------------------------------------------
@@ -28,7 +37,9 @@ print(f"Device in use: {CONFIG['device']}")
 # ------------------------------------------------------------------
 fds = FederatedDataset(
     dataset="uoft-cs/cifar100",
+    revision=CONFIG["dataset_revision"],
     partitioners={"train": CONFIG["num_clients"]},
+    seed=CONFIG["seed"],
 )
 
 group_a_classes = list(range(0, 50))
@@ -79,11 +90,11 @@ def get_model():
     model.maxpool = nn.Identity()
     return model
 
-def train_local(model, train_loader, epochs, lr, device):
+def train_local(model, train_loader, epochs, lr, device, max_steps=None):
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
-    
+    steps = 0
     for _ in range(epochs):
         for imgs, labels in train_loader:
             imgs, labels = imgs.to(device), labels.to(device)
@@ -92,7 +103,9 @@ def train_local(model, train_loader, epochs, lr, device):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-            
+            steps += 1
+            if max_steps is not None and steps >= max_steps:
+                return model.state_dict()
     return model.state_dict()
 
 def evaluate(model, test_loader, device):
@@ -116,9 +129,13 @@ def clear_memory():
 # ------------------------------------------------------------------
 # 4. Replay Buffer Simulation Runner
 # ------------------------------------------------------------------
-def run_experiment(replay_fraction):
+def run_experiment(replay_percent):
+    replay_fraction = replay_percent / 100
+    # Cada variante reinicia la semilla: la fase A es idéntica en todas y la
+    # comparación no depende del orden de ejecución.
+    seed_everything(CONFIG["seed"])
     print(f"\n========================================================")
-    print(f"  RUNNING EXPERIMENT: Replay Buffer = {int(replay_fraction * 100)}%")
+    print(f"  RUNNING EXPERIMENT: Replay Buffer = {replay_percent}%")
     print(f"========================================================")
 
     global_model = get_model().to(CONFIG["device"])
@@ -135,9 +152,8 @@ def run_experiment(replay_fraction):
             
             # Save a sample of Group A data as Replay Buffer on the last round of Phase 1
             if r == CONFIG["num_rounds"] - 1:
-                buffer_size = int(len(client_group_a) * replay_fraction)
-                shuffled_indices = np.random.choice(len(client_group_a), size=buffer_size, replace=False)
-                client_replay_buffers[client_id] = client_group_a.select(shuffled_indices)
+                indices = nested_buffer_indices(len(client_group_a), replay_fraction, CONFIG["seed"], client_id)
+                client_replay_buffers[client_id] = client_group_a.select(indices) if indices else None
 
             train_loader = DataLoader(
                 client_group_a.with_transform(transform_batch), 
@@ -175,12 +191,11 @@ def run_experiment(replay_fraction):
             client_partition = fds.load_partition(partition_id=client_id, split="train")
             client_group_b = filter_by_classes(client_partition, group_b_classes)
             
-            replay_data = client_replay_buffers[client_id]
-            
-            combined_dataset = ConcatDataset([
-                client_group_b.with_transform(transform_batch),
-                replay_data.with_transform(transform_batch)
-            ])
+            # Combine Group B data with the client's Group A replay buffer (if any)
+            datasets_to_combine = [client_group_b.with_transform(transform_batch)]
+            if client_replay_buffers[client_id] is not None:
+                datasets_to_combine.append(client_replay_buffers[client_id].with_transform(transform_batch))
+            combined_dataset = ConcatDataset(datasets_to_combine)
             
             train_loader = DataLoader(
                 combined_dataset, 
@@ -192,7 +207,8 @@ def run_experiment(replay_fraction):
             local_model = get_model().to(CONFIG["device"])
             local_model.load_state_dict(global_model.state_dict())
             
-            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
+            max_steps = step_budget(len(client_group_b), CONFIG["batch_size"], CONFIG["local_epochs"], CONFIG["equal_steps"])
+            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"], max_steps=max_steps)
             local_weights.append(w)
         
         # FedAvg Aggregation
@@ -215,65 +231,16 @@ def run_experiment(replay_fraction):
 
     clear_memory()
 
-    return {
-        "fraction": f"{int(replay_fraction * 100)}%",
-        "step3_acc_a": acc_a_after_step3 * 100,
-        "step4_acc_a": acc_a_after_step4 * 100,
-        "step4_acc_b": acc_b_after_step4 * 100,
-        "loss_a": (acc_a_after_step3 - acc_a_after_step4) * 100
-    }
+    buffer_total = sum(len(b) for b in client_replay_buffers.values() if b is not None)
+    return make_result(replay_percent, acc_a_after_step3 * 100, acc_a_after_step4 * 100, acc_b_after_step4 * 100,
+                       buffer_samples=buffer_total, seed=CONFIG["seed"], equal_steps=CONFIG["equal_steps"])
 
 # ------------------------------------------------------------------
-# 5. Execute All Replay Experiments (%5, %15, %25)
+# Run every buffer, including 0 % (no replay), which is measured, not assumed.
 # ------------------------------------------------------------------
-results_5pct = run_experiment(0.05)
-results_15pct = run_experiment(0.15)
-results_25pct = run_experiment(0.25)
+all_results = [run_experiment(percent) for percent in args.buffers]
 
-# Baseline (No Replay) Values from Step 5
-baseline_results = {
-    "fraction": "No Replay",
-    "step3_acc_a": 25.06,
-    "step4_acc_a": 0.00,
-    "step4_acc_b": 20.66,
-    "loss_a": 25.06
-}
-
-all_results = [baseline_results, results_5pct, results_15pct, results_25pct]
-
-# ------------------------------------------------------------------
-# 6. Summary Table Display
-# ------------------------------------------------------------------
-print("\n" + "="*90)
-print("                    FINAL COMPARISON TABLE (STEP 7)")
-print("="*90)
-print(f"{'Method':<20} | {'Group A (Before)':<18} | {'Group A (After)':<18} | {'Group B (After)':<18} | {'Accuracy Loss':<15}")
-print("-" * 95)
-for res in all_results:
-    print(f"{res['fraction']:<20} | {res['step3_acc_a']:>17.2f}% | {res['step4_acc_a']:>17.2f}% | {res['step4_acc_b']:>17.2f}% | {res['loss_a']:>14.2f}%")
-print("="*90)
-
-# ------------------------------------------------------------------
-# 7. Plot & Save Chart
-# ------------------------------------------------------------------
-methods = [res['fraction'] for res in all_results]
-accuracy_losses = [res['loss_a'] for res in all_results]
-colors = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6']
-
-plt.figure(figsize=(9, 5.5), dpi=300)
-bars = plt.bar(methods, accuracy_losses, color=colors, width=0.45, edgecolor='black', linewidth=1)
-
-plt.title('Group A Accuracy Loss Across All Methods', fontsize=14, fontweight='bold', pad=15)
-plt.xlabel('Method', fontsize=12, labelpad=10)
-plt.ylabel('Accuracy Loss (%)', fontsize=12, labelpad=10)
-plt.ylim(0, 30)
-plt.grid(axis='y', linestyle='--', alpha=0.5)
-
-for bar in bars:
-    yval = bar.get_height()
-    plt.text(bar.get_x() + bar.get_width() / 2.0, yval + 0.7, f'{yval:.2f}%', ha='center', va='bottom', fontweight='bold')
-
-plt.tight_layout()
-plt.savefig('group_a_accuracy_loss_all_buffers.png', dpi=300)
-print("\n[INFO] Chart successfully saved as 'group_a_accuracy_loss_all_buffers.png'")
-plt.show()
+# Labels come from each result, so the summary can no longer mislabel buffers.
+print_table("FINAL COMPARISON TABLE (STEP 7)", all_results)
+save_results_csv(all_results)
+plot_loss(all_results, "group_a_accuracy_loss_all_buffers.png", "Group A Accuracy Loss Across All Methods")

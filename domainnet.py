@@ -8,8 +8,10 @@ from torch.utils.data import DataLoader, Dataset, ConcatDataset, Subset
 from torchvision.models import resnet18
 import torchvision.transforms as transforms
 import numpy as np
-import matplotlib.pyplot as plt
 from datasets import load_dataset
+from reproducibility import seed_everything
+from experiment_common import (build_parser, apply_args, nested_buffer_indices, step_budget,
+                               make_result, print_table, save_results_csv, plot_loss)
 
 # Configuration Setup
 CONFIG = {
@@ -19,9 +21,16 @@ CONFIG = {
     "num_rounds": 5,
     "lr": 0.001,
     "num_classes": 10,  # Focus on the first 10 distinct classes
+    "seed": 42,
+    "dataset_revision": "ee20570ae7a29c51571e55a9a17983f7625295d6",
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
 
+parser = build_parser("DomainNet: fotos reales (A) y luego bocetos (B) con distintos buffers")
+args = parser.parse_args()
+apply_args(args, CONFIG, parser)
+
+seed_everything(CONFIG["seed"])
 print(f"Device in use: {CONFIG['device']}")
 
 class DomainNetDataset(Dataset):
@@ -70,7 +79,7 @@ def get_model():
     model.maxpool = nn.Identity()
     return model
 
-def train_local(model, train_loader, epochs, lr, device):
+def train_local(model, train_loader, epochs, lr, device, max_steps=None):
     """
     Trains the local model on client dataset for specified local epochs.
     """
@@ -78,6 +87,7 @@ def train_local(model, train_loader, epochs, lr, device):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
     
+    steps = 0
     for _ in range(epochs):
         for imgs, labels in train_loader:
             imgs, labels = imgs.to(device), labels.to(device)
@@ -86,6 +96,9 @@ def train_local(model, train_loader, epochs, lr, device):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            steps += 1
+            if max_steps is not None and steps >= max_steps:
+                return model.state_dict()
             
     return model.state_dict()
 
@@ -128,45 +141,6 @@ def create_client_partitions(dataset, num_clients):
         client_datasets.append(Subset(dataset, client_indices))
     return client_datasets
 
-def print_table(title, results_list):
-    """
-    Prints a formatted summary table of accuracy and loss values.
-    """
-    print("\n" + "="*95)
-    print(f"                    {title}")
-    print("="*95)
-    print(f"{'Method':<20} | {'Domain A (Before)':<18} | {'Domain A (After)':<18} | {'Domain B (After)':<18} | {'Accuracy Loss':<15}")
-    print("-" * 100)
-    for res in results_list:
-        print(f"{res['fraction']:<20} | {res['step3_acc_a']:>17.2f}% | {res['step4_acc_a']:>17.2f}% | {res['step4_acc_b']:>17.2f}% | {res['loss_a']:>14.2f}%")
-    print("="*95)
-
-def plot_and_save_chart(results_list, filename, title_text):
-    """
-    Plots and saves a high-DPI bar chart showing Group A accuracy loss.
-    """
-    methods = [res['fraction'] for res in results_list]
-    accuracy_losses = [res['loss_a'] for res in results_list]
-    colors = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6'][:len(results_list)]
-
-    plt.figure(figsize=(9, 5.5), dpi=300)
-    bars = plt.bar(methods, accuracy_losses, color=colors, width=0.45, edgecolor='black', linewidth=1)
-
-    plt.title(title_text, fontsize=14, fontweight='bold', pad=15)
-    plt.xlabel('Replay Buffer Size', fontsize=12, labelpad=10)
-    plt.ylabel('Domain A Accuracy Loss (%)', fontsize=12, labelpad=10)
-    plt.ylim(0, max(accuracy_losses) + 10 if len(accuracy_losses) > 0 and max(accuracy_losses) > 0 else 50)
-    plt.grid(axis='y', linestyle='--', alpha=0.5)
-
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2.0, yval + 0.7, f'{yval:.2f}%', ha='center', va='bottom', fontweight='bold')
-
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    print(f"\n[INFO] Chart successfully saved as '{filename}'")
-    plt.show()
-
 print("\n[INFO] Loading DomainNet dataset from Hugging Face...")
 
 # NOTE: "greg_h/domainnet" does not exist on the Hub. Using the real, public
@@ -174,8 +148,8 @@ print("\n[INFO] Loading DomainNet dataset from Hugging Face...")
 # domains together in one split (train/test), distinguished by a `domain`
 # column, instead of separate per-domain configs -- so we load it once and
 # filter by domain name below.
-raw_train = load_dataset("wltjr1007/DomainNet", split="train")
-raw_test = load_dataset("wltjr1007/DomainNet", split="test")
+raw_train = load_dataset("wltjr1007/DomainNet", split="train", revision=CONFIG["dataset_revision"])
+raw_test = load_dataset("wltjr1007/DomainNet", split="test", revision=CONFIG["dataset_revision"])
 
 # "domain" is a class_label column; map domain name -> integer index
 # (don't hardcode the index, the ordering isn't guaranteed to be stable).
@@ -238,9 +212,11 @@ for r in range(CONFIG["num_rounds"]):
 base_group_a_weights = copy.deepcopy(global_model.state_dict())
 base_acc_a = evaluate(global_model, test_loader_a, CONFIG["device"]) * 100
 
-def run_phase2_experiment(replay_fraction):
+def run_phase2_experiment(replay_percent):
+    replay_fraction = replay_percent / 100
+    seed_everything(CONFIG["seed"])  # misma semilla en todas las variantes
     print(f"\n========================================================")
-    print(f"  RUNNING PHASE 2 (SKETCH): Replay Buffer = {int(replay_fraction * 100)}%")
+    print(f"  RUNNING PHASE 2 (SKETCH): Replay Buffer = {replay_percent}%")
     print(f"========================================================")
 
     global_model = get_model().to(CONFIG["device"])
@@ -249,12 +225,8 @@ def run_phase2_experiment(replay_fraction):
     client_replay_buffers = {}
     for client_id in range(CONFIG["num_clients"]):
         client_data_a = client_a_partitions[client_id]
-        buffer_size = int(len(client_data_a) * replay_fraction)
-        if buffer_size > 0:
-            shuffled_indices = np.random.choice(len(client_data_a), size=buffer_size, replace=False)
-            client_replay_buffers[client_id] = Subset(client_data_a, shuffled_indices)
-        else:
-            client_replay_buffers[client_id] = None
+        indices = nested_buffer_indices(len(client_data_a), replay_fraction, CONFIG["seed"], client_id)
+        client_replay_buffers[client_id] = Subset(client_data_a, indices) if indices else None
 
     for r in range(CONFIG["num_rounds"]):
         local_weights = []
@@ -272,7 +244,8 @@ def run_phase2_experiment(replay_fraction):
             local_model = get_model().to(CONFIG["device"])
             local_model.load_state_dict(global_model.state_dict())
             
-            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
+            max_steps = step_budget(len(client_data_b), CONFIG["batch_size"], CONFIG["local_epochs"], CONFIG["equal_steps"])
+            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"], max_steps=max_steps)
             local_weights.append(w)
         
         # FedAvg Aggregation
@@ -294,25 +267,15 @@ def run_phase2_experiment(replay_fraction):
 
     clear_memory()
 
-    return {
-        "fraction": f"{int(replay_fraction * 100)}%",
-        "step3_acc_a": base_acc_a,
-        "step4_acc_a": acc_a_after,
-        "step4_acc_b": acc_b_after,
-        "loss_a": base_acc_a - acc_a_after
-    }
+    buffer_total = sum(len(b) for b in client_replay_buffers.values() if b is not None)
+    return make_result(replay_percent, base_acc_a, acc_a_after, acc_b_after,
+                       buffer_samples=buffer_total, seed=CONFIG["seed"], equal_steps=CONFIG["equal_steps"])
 
-# Execute 5% and 15% Replay Experiments
-results_5pct = run_phase2_experiment(0.05)
-results_15pct = run_phase2_experiment(0.15)
-results_0pct = run_phase2_experiment(0.00)  # No Replay Baseline
+# Execute replay buffer experiments (0 % = no replay, measured like the rest)
+all_results = [run_phase2_experiment(percent) for percent in args.buffers]
+up_to_20 = [r for r in all_results if r["replay_percent"] <= 20]
 
-results_stage_1 = [results_0pct, results_5pct, results_15pct]
-print_table("INTERMEDIATE TABLE (AFTER 5% & 15% REPLAY)", results_stage_1)
-plot_and_save_chart(results_stage_1, "domainnet_accuracy_loss_5_15.png", "Domain A Accuracy Loss (No Replay vs 5% & 15%)")
-
-results_25pct = run_phase2_experiment(0.25)
-
-results_stage_2 = [results_0pct, results_5pct, results_15pct, results_25pct]
-print_table("FINAL COMPARISON TABLE (AFTER 25% REPLAY - ALL RESULTS)", results_stage_2)
-plot_and_save_chart(results_stage_2, "domainnet_accuracy_loss_all_buffers.png", "Domain A Accuracy Loss Across All Replay Buffers")
+print_table("FINAL COMPARISON TABLE (DOMAINNET)", all_results, group_a="Real", group_b="Sketch")
+save_results_csv(all_results)
+plot_loss(up_to_20, "domainnet_accuracy_loss_up_to_20.png", "Domain A Accuracy Loss (buffers up to 20%)", xlabel="Replay Buffer Size")
+plot_loss(all_results, "domainnet_accuracy_loss_all_buffers.png", "Domain A Accuracy Loss Across All Replay Buffers", xlabel="Replay Buffer Size")

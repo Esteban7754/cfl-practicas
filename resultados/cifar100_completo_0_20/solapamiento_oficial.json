@@ -1,0 +1,161 @@
+{
+  "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
+  "official_split_sizes": {
+    "train": 50000,
+    "test": 10000
+  },
+  "unique_shared_image_hashes": 10,
+  "test_samples_identical_to_training": 10,
+  "shared_images": [
+    {
+      "sha256": "0eec83be0288eb275a9bd658e2773aaa4a83a4a52c4ec43fa3c1debb38fc2d0b",
+      "train": [
+        {
+          "index": 25390,
+          "label": 35
+        }
+      ],
+      "test": [
+        {
+          "index": 5564,
+          "label": 2
+        }
+      ]
+    },
+    {
+      "sha256": "29fe37917777bdd51661d2cae64ea16d5266c4947110d79ead631189febb377c",
+      "train": [
+        {
+          "index": 32205,
+          "label": 52
+        }
+      ],
+      "test": [
+        {
+          "index": 1357,
+          "label": 96
+        }
+      ]
+    },
+    {
+      "sha256": "3b560d5a8768ea2b066c689def75eeb9dbd4573fba4cf533ca3c7ed175928da8",
+      "train": [
+        {
+          "index": 28189,
+          "label": 1
+        }
+      ],
+      "test": [
+        {
+          "index": 3499,
+          "label": 1
+        }
+      ]
+    },
+    {
+      "sha256": "406e82f832bd11c769fbf7b5abbe3279a5c164f98ac286e78db1273539dd1538",
+      "train": [
+        {
+          "index": 21619,
+          "label": 1
+        }
+      ],
+      "test": [
+        {
+          "index": 3932,
+          "label": 1
+        }
+      ]
+    },
+    {
+      "sha256": "40f5d5f001406b27d5a2f6274cf5aadb6d8d8c98071753a762f1c0118d9b6086",
+      "train": [
+        {
+          "index": 15597,
+          "label": 1
+        }
+      ],
+      "test": [
+        {
+          "index": 9524,
+          "label": 1
+        }
+      ]
+    },
+    {
+      "sha256": "4de97c5289587a6ad5fed134739fd3f553e3ea1596a97052ecb7d1c914156b4c",
+      "train": [
+        {
+          "index": 29363,
+          "label": 1
+        }
+      ],
+      "test": [
+        {
+          "index": 4716,
+          "label": 1
+        }
+      ]
+    },
+    {
+      "sha256": "4f89e9ecee0e7fd700624c138aa06cad4e497349ad93f24a52fefb7b98842882",
+      "train": [
+        {
+          "index": 37654,
+          "label": 55
+        }
+      ],
+      "test": [
+        {
+          "index": 6526,
+          "label": 72
+        }
+      ]
+    },
+    {
+      "sha256": "84306460e8985cdd3027d9a69441cbed223aa95052aa523ee91dab70a9d6f8c4",
+      "train": [
+        {
+          "index": 28538,
+          "label": 72
+        }
+      ],
+      "test": [
+        {
+          "index": 2615,
+          "label": 55
+        }
+      ]
+    },
+    {
+      "sha256": "86683e9dcf91816f764c8ae9170a91af950e0688d426aa96fd3bd17924f77676",
+      "train": [
+        {
+          "index": 24083,
+          "label": 55
+        }
+      ],
+      "test": [
+        {
+          "index": 1100,
+          "label": 72
+        }
+      ]
+    },
+    {
+      "sha256": "e4b2e4ea055b7e0c3fd8a6100fa777cf9057883f4c5451ef11eee75ad88098be",
+      "train": [
+        {
+          "index": 30697,
+          "label": 35
+        }
+      ],
+      "test": [
+        {
+          "index": 2996,
+          "label": 2
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+fraction,step3_acc_a,step4_acc_a,step4_acc_b,loss_a
+No Replay,2.0,0.0,3.0,2.0
+5% Replay,2.0,0.0,5.0,2.0
+10% Replay,2.0,0.0,0.0,2.0
+15% Replay,2.0,0.0,5.0,2.0
+20% Replay,2.0,0.0,0.0,2.0
+25% Replay,2.0,0.0,1.0,2.0

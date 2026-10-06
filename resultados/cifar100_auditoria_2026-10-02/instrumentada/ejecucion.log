@@ -1,0 +1,69 @@
+QUICK TEST: muestras reducidas; las precisiones no son resultados del experimento completo.
+Device in use: cpu
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:13:17 2026).
+
+========================================================
+  PHASE 1: TRAINING ON GROUP A (ONCE FOR ALL EXPERIMENTS)
+========================================================
+Phase 1 - Round 1/1 -> Group A Accuracy: 2.00%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = No Replay
+========================================================
+Phase 2 - Round 1/1 -> Group A Accuracy: 0.00% | Group B Accuracy: 3.00%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 5% Replay
+========================================================
+Phase 2 - Round 1/1 -> Group A Accuracy: 0.00% | Group B Accuracy: 5.00%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 10% Replay
+========================================================
+Phase 2 - Round 1/1 -> Group A Accuracy: 0.00% | Group B Accuracy: 0.00%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 15% Replay
+========================================================
+Phase 2 - Round 1/1 -> Group A Accuracy: 0.00% | Group B Accuracy: 5.00%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 20% Replay
+========================================================
+Phase 2 - Round 1/1 -> Group A Accuracy: 0.00% | Group B Accuracy: 0.00%
+
+===============================================================================================
+                    INTERMEDIATE TABLE (NO REPLAY vs 5%, 10%, 15% & 20% REPLAY)
+===============================================================================================
+Method               | Group A (Before)   | Group A (After)    | Group B (After)    | Accuracy Loss  
+-----------------------------------------------------------------------------------------------
+No Replay            |              2.00% |              0.00% |              3.00% |           2.00%
+5% Replay            |              2.00% |              0.00% |              5.00% |           2.00%
+10% Replay           |              2.00% |              0.00% |              0.00% |           2.00%
+15% Replay           |              2.00% |              0.00% |              5.00% |           2.00%
+20% Replay           |              2.00% |              0.00% |              0.00% |           2.00%
+===============================================================================================
+
+[INFO] Chart successfully saved as 'group_a_accuracy_loss_up_to_20.png'
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 25% Replay
+========================================================
+Phase 2 - Round 1/1 -> Group A Accuracy: 0.00% | Group B Accuracy: 1.00%
+
+===============================================================================================
+                    FINAL COMPARISON TABLE (ALL REPLAY BUFFERS)
+===============================================================================================
+Method               | Group A (Before)   | Group A (After)    | Group B (After)    | Accuracy Loss  
+-----------------------------------------------------------------------------------------------
+No Replay            |              2.00% |              0.00% |              3.00% |           2.00%
+5% Replay            |              2.00% |              0.00% |              5.00% |           2.00%
+10% Replay           |              2.00% |              0.00% |              0.00% |           2.00%
+15% Replay           |              2.00% |              0.00% |              5.00% |           2.00%
+20% Replay           |              2.00% |              0.00% |              0.00% |           2.00%
+25% Replay           |              2.00% |              0.00% |              1.00% |           2.00%
+===============================================================================================
+
+[INFO] Chart successfully saved as 'group_a_accuracy_loss_all_buffers.png'
+[AUDIT] Diagnósticos guardados en audit.json y pesos en audit_phase*.pt

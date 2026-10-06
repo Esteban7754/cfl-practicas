@@ -1,0 +1,27 @@
+{
+  "num_clients": 2,
+  "batch_size": 32,
+  "local_epochs": 3,
+  "num_rounds": 3,
+  "lr": 0.001,
+  "seed": 42,
+  "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
+  "device": "cpu",
+  "train_samples_per_group": 500,
+  "test_samples_per_group": 1000,
+  "sampling": "balanced",
+  "min_base_accuracy_percent": 10.0,
+  "min_new_task_accuracy_percent": 8.0,
+  "equal_optimizer_steps": true,
+  "quick": false,
+  "validation": true,
+  "audit": true,
+  "buffers": [
+    0,
+    20
+  ],
+  "torch_version": "2.14.1+cpu",
+  "cpu_threads": 4,
+  "phase1_checkpoint": "/workspace/global_model_phase1.pt",
+  "phase1_checkpoint_sha256": "4d98d450f61031ff29d1642d20227e5453ef2e5dc122893e1aed051ac22c5a77"
+}

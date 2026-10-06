@@ -1,0 +1,17 @@
+services:
+  cfl:
+    image: cfl-practicas
+    build: .
+    volumes:
+      - .:/workspace
+      - cfl-hf-cache:/cache/huggingface
+    working_dir: /workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MPLBACKEND=Agg
+    stdin_open: true
+    tty: true
+
+volumes:
+  cfl-hf-cache:
+    external: true

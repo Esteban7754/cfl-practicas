@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Verificar Entorno (test_env.py)",
+            "type": "shell",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python test_env.py",
+            "problemMatcher": [],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Ejecutar Archivo Actual en Docker",
+            "type": "shell",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python ${fileBasename}",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Ejecutar step_four.py (CIFAR-100 inicial)",
+            "type": "shell",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python step_four.py",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ejecutar cifar100_three_buffer.py",
+            "type": "shell",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python cifar100_three_buffer.py",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ejecutar domainnet.py",
+            "type": "shell",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python domainnet.py",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ejecutar three_buffer_v2.py",
+            "type": "shell",
+            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python three_buffer_v2.py",
+            "problemMatcher": []
+        }
+    ]
+}

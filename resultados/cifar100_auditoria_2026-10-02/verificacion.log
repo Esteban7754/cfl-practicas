@@ -1,0 +1,93 @@
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:29:50 2026).
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  10%|█         | 1000/10000 [00:00<00:00, 9673.97 examples/s]
+Filter:  30%|███       | 3000/10000 [00:00<00:00, 12054.60 examples/s]
+Filter:  50%|█████     | 5000/10000 [00:00<00:00, 12400.57 examples/s]
+Filter:  70%|███████   | 7000/10000 [00:00<00:00, 12739.78 examples/s]
+Filter:  90%|█████████ | 9000/10000 [00:00<00:00, 8932.95 examples/s] 
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 10246.10 examples/s]
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 2000/10000 [00:00<00:00, 11725.09 examples/s]
+Filter:  40%|████      | 4000/10000 [00:00<00:00, 11534.88 examples/s]
+Filter:  60%|██████    | 6000/10000 [00:00<00:00, 11661.50 examples/s]
+Filter:  80%|████████  | 8000/10000 [00:00<00:00, 12107.60 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 11377.40 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 11479.93 examples/s]
+phase1 {"A": {"correct": 2, "total": 100, "accuracy_percent": 2.0, "prediction_counts": {"27": 31, "23": 69}, "predictions_group_a": 100, "predictions_group_b": 0}, "B": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"23": 75, "27": 25}, "predictions_group_a": 100, "predictions_group_b": 0}}
+phase2_0 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"95": 47, "67": 53}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 3, "total": 100, "accuracy_percent": 3.0, "prediction_counts": {"67": 40, "95": 57, "53": 3}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_5 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"88": 56, "76": 8, "67": 20, "95": 14, "80": 2}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 5, "total": 100, "accuracy_percent": 5.0, "prediction_counts": {"88": 54, "67": 19, "95": 14, "76": 10, "80": 1, "89": 2}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_10 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 98, "76": 2}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 99, "76": 1}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_15 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"76": 12, "53": 36, "61": 52}, "predictions_group_a": 0, "predictions_group_b": 100}, "B": {"correct": 5, "total": 100, "accuracy_percent": 5.0, "prediction_counts": {"53": 31, "61": 52, "76": 17}, "predictions_group_a": 0, "predictions_group_b": 100}}
+phase2_20 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 78, "30": 7, "99": 15}, "predictions_group_a": 7, "predictions_group_b": 93}, "B": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 80, "30": 5, "99": 13, "88": 1, "80": 1}, "predictions_group_a": 5, "predictions_group_b": 95}}
+phase2_25 {"A": {"correct": 0, "total": 100, "accuracy_percent": 0.0, "prediction_counts": {"67": 97, "95": 2, "49": 1}, "predictions_group_a": 1, "predictions_group_b": 99}, "B": {"correct": 1, "total": 100, "accuracy_percent": 1.0, "prediction_counts": {"67": 94, "95": 4, "27": 2}, "predictions_group_a": 2, "predictions_group_b": 98}}
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:31:09 2026).
+
+Filter:   0%|          | 0/25000 [00:00<?, ? examples/s]
+Filter:   8%|▊         | 2000/25000 [00:00<00:01, 11714.75 examples/s]
+Filter:  16%|█▌        | 4000/25000 [00:00<00:01, 11481.81 examples/s]
+Filter:  24%|██▍       | 6000/25000 [00:00<00:01, 11671.93 examples/s]
+Filter:  32%|███▏      | 8000/25000 [00:00<00:01, 11990.22 examples/s]
+Filter:  40%|████      | 10000/25000 [00:00<00:01, 12154.80 examples/s]
+Filter:  48%|████▊     | 12000/25000 [00:00<00:01, 12360.82 examples/s]
+Filter:  56%|█████▌    | 14000/25000 [00:01<00:00, 12489.25 examples/s]
+Filter:  64%|██████▍   | 16000/25000 [00:01<00:00, 12486.21 examples/s]
+Filter:  72%|███████▏  | 18000/25000 [00:01<00:00, 12596.29 examples/s]
+Filter:  80%|████████  | 20000/25000 [00:01<00:00, 12685.01 examples/s]
+Filter:  88%|████████▊ | 22000/25000 [00:01<00:00, 12440.24 examples/s]
+Filter:  96%|█████████▌| 24000/25000 [00:01<00:00, 12436.76 examples/s]
+Filter: 100%|██████████| 25000/25000 [00:02<00:00, 12259.84 examples/s]
+
+Filter:   0%|          | 0/25000 [00:00<?, ? examples/s]
+Filter:   8%|▊         | 2000/25000 [00:00<00:01, 11988.80 examples/s]
+Filter:  16%|█▌        | 4000/25000 [00:00<00:01, 11319.79 examples/s]
+Filter:  24%|██▍       | 6000/25000 [00:00<00:01, 11745.73 examples/s]
+Filter:  32%|███▏      | 8000/25000 [00:00<00:01, 12139.11 examples/s]
+Filter:  40%|████      | 10000/25000 [00:00<00:01, 12367.31 examples/s]
+Filter:  48%|████▊     | 12000/25000 [00:00<00:01, 12413.70 examples/s]
+Filter:  56%|█████▌    | 14000/25000 [00:01<00:00, 12581.08 examples/s]
+Filter:  64%|██████▍   | 16000/25000 [00:01<00:00, 12613.96 examples/s]
+Filter:  72%|███████▏  | 18000/25000 [00:01<00:00, 12708.24 examples/s]
+Filter:  80%|████████  | 20000/25000 [00:01<00:00, 12661.18 examples/s]
+Filter:  88%|████████▊ | 22000/25000 [00:01<00:00, 12546.83 examples/s]
+Filter:  96%|█████████▌| 24000/25000 [00:01<00:00, 12751.69 examples/s]
+Filter: 100%|██████████| 25000/25000 [00:02<00:00, 12421.55 examples/s]
+
+Filter:   0%|          | 0/25000 [00:00<?, ? examples/s]
+Filter:   8%|▊         | 2000/25000 [00:00<00:01, 12442.46 examples/s]
+Filter:  16%|█▌        | 4000/25000 [00:00<00:01, 12183.43 examples/s]
+Filter:  24%|██▍       | 6000/25000 [00:00<00:01, 12565.09 examples/s]
+Filter:  32%|███▏      | 8000/25000 [00:00<00:01, 12844.26 examples/s]
+Filter:  40%|████      | 10000/25000 [00:00<00:01, 12142.52 examples/s]
+Filter:  48%|████▊     | 12000/25000 [00:00<00:01, 11813.58 examples/s]
+Filter:  56%|█████▌    | 14000/25000 [00:01<00:00, 11564.48 examples/s]
+Filter:  64%|██████▍   | 16000/25000 [00:01<00:00, 11858.83 examples/s]
+Filter:  72%|███████▏  | 18000/25000 [00:01<00:00, 12178.72 examples/s]
+Filter:  80%|████████  | 20000/25000 [00:01<00:00, 12450.32 examples/s]
+Filter:  88%|████████▊ | 22000/25000 [00:01<00:00, 12463.04 examples/s]
+Filter:  96%|█████████▌| 24000/25000 [00:01<00:00, 12441.93 examples/s]
+Filter: 100%|██████████| 25000/25000 [00:02<00:00, 12258.39 examples/s]
+
+Filter:   0%|          | 0/25000 [00:00<?, ? examples/s]
+Filter:   8%|▊         | 2000/25000 [00:00<00:01, 13173.69 examples/s]
+Filter:  16%|█▌        | 4000/25000 [00:00<00:01, 13371.08 examples/s]
+Filter:  24%|██▍       | 6000/25000 [00:00<00:01, 13221.86 examples/s]
+Filter:  32%|███▏      | 8000/25000 [00:00<00:01, 13110.52 examples/s]
+Filter:  40%|████      | 10000/25000 [00:00<00:01, 13010.22 examples/s]
+Filter:  48%|████▊     | 12000/25000 [00:01<00:01, 9346.93 examples/s] 
+Filter:  56%|█████▌    | 14000/25000 [00:01<00:01, 9956.99 examples/s]
+Filter:  64%|██████▍   | 16000/25000 [00:01<00:00, 9928.77 examples/s]
+Filter:  72%|███████▏  | 18000/25000 [00:01<00:00, 10624.67 examples/s]
+Filter:  80%|████████  | 20000/25000 [00:01<00:00, 11148.85 examples/s]
+Filter:  88%|████████▊ | 22000/25000 [00:01<00:00, 11443.63 examples/s]
+Filter:  96%|█████████▌| 24000/25000 [00:02<00:00, 11623.94 examples/s]
+Filter: 100%|██████████| 25000/25000 [00:02<00:00, 11332.92 examples/s]
+Control de memorización, paso 10: loss=0.003868
+Control de memorización, paso 20: loss=0.000972
+Control de memorización, paso 30: loss=0.000494
+Control de memorización, paso 40: loss=0.000323
+Control de memorización, paso 50: loss=0.000245
+AUDITORÍA SUPERADA: CSV verificado de forma independiente, actualizaciones reales y control de aprendizaje correcto.

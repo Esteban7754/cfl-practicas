@@ -1,0 +1,252 @@
+Device in use: cpu
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+========================================================
+  PHASE 1: TRAINING ON GROUP A (ONCE FOR ALL EXPERIMENTS)
+========================================================
+[INFO] Fase A reutilizada de: /workspace/global_model_phase1.pt
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11208.62 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12154.02 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11507.50 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 5758.44 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 8420.49 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 8421.98 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11507.81 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12021.32 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11815.78 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12440.51 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12376.15 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12205.87 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12248.66 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11546.12 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11674.98 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12486.24 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12131.07 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12114.03 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11676.61 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12314.43 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12238.76 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12489.79 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12699.59 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12492.57 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 13330.25 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12644.68 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12524.46 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12858.94 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12991.41 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12868.08 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12970.86 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12327.13 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12079.94 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 13184.64 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12893.22 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12903.67 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11092.36 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12050.21 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12033.32 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 10437.99 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11295.16 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11021.24 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11773.70 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 10641.30 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11102.17 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12764.84 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12859.99 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12690.58 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12509.52 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12033.91 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12226.87 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12022.71 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11300.59 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11244.64 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 10466.71 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 10997.40 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 10576.93 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11162.16 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12033.69 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12029.90 examples/s]
+[DATA] El buffer se calcula sobre 25000 imágenes A en total.
+[INFO] Precisión A antes de comparar replay: 26.88%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = No Replay
+========================================================
+[REPLAY] Memoria real: 0/25000 imágenes A.
+[CLIENT] Buffer 0%, round 1, client 1/10: 79 updates
+[CLIENT] Buffer 0%, round 1, client 2/10: 78 updates
+[CLIENT] Buffer 0%, round 1, client 3/10: 78 updates
+[CLIENT] Buffer 0%, round 1, client 4/10: 79 updates
+[CLIENT] Buffer 0%, round 1, client 5/10: 78 updates
+[CLIENT] Buffer 0%, round 1, client 6/10: 79 updates
+[CLIENT] Buffer 0%, round 1, client 7/10: 79 updates
+[CLIENT] Buffer 0%, round 1, client 8/10: 78 updates
+[CLIENT] Buffer 0%, round 1, client 9/10: 80 updates
+[CLIENT] Buffer 0%, round 1, client 10/10: 78 updates
+Phase 2 - Round 1/5 -> Group A Accuracy: 0.10% | Group B Accuracy: 2.84%
+[CLIENT] Buffer 0%, round 2, client 1/10: 79 updates
+[CLIENT] Buffer 0%, round 2, client 2/10: 78 updates
+[CLIENT] Buffer 0%, round 2, client 3/10: 78 updates
+[CLIENT] Buffer 0%, round 2, client 4/10: 79 updates
+[CLIENT] Buffer 0%, round 2, client 5/10: 78 updates
+[CLIENT] Buffer 0%, round 2, client 6/10: 79 updates
+[CLIENT] Buffer 0%, round 2, client 7/10: 79 updates
+[CLIENT] Buffer 0%, round 2, client 8/10: 78 updates
+[CLIENT] Buffer 0%, round 2, client 9/10: 80 updates
+[CLIENT] Buffer 0%, round 2, client 10/10: 78 updates
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 5.02%
+[CLIENT] Buffer 0%, round 3, client 1/10: 79 updates
+[CLIENT] Buffer 0%, round 3, client 2/10: 78 updates
+[CLIENT] Buffer 0%, round 3, client 3/10: 78 updates
+[CLIENT] Buffer 0%, round 3, client 4/10: 79 updates
+[CLIENT] Buffer 0%, round 3, client 5/10: 78 updates
+[CLIENT] Buffer 0%, round 3, client 6/10: 79 updates
+[CLIENT] Buffer 0%, round 3, client 7/10: 79 updates
+[CLIENT] Buffer 0%, round 3, client 8/10: 78 updates
+[CLIENT] Buffer 0%, round 3, client 9/10: 80 updates
+[CLIENT] Buffer 0%, round 3, client 10/10: 78 updates
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 11.70%
+[CLIENT] Buffer 0%, round 4, client 1/10: 79 updates
+[CLIENT] Buffer 0%, round 4, client 2/10: 78 updates
+[CLIENT] Buffer 0%, round 4, client 3/10: 78 updates
+[CLIENT] Buffer 0%, round 4, client 4/10: 79 updates
+[CLIENT] Buffer 0%, round 4, client 5/10: 78 updates
+[CLIENT] Buffer 0%, round 4, client 6/10: 79 updates
+[CLIENT] Buffer 0%, round 4, client 7/10: 79 updates
+[CLIENT] Buffer 0%, round 4, client 8/10: 78 updates
+[CLIENT] Buffer 0%, round 4, client 9/10: 80 updates
+[CLIENT] Buffer 0%, round 4, client 10/10: 78 updates
+Phase 2 - Round 4/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 18.76%
+[CLIENT] Buffer 0%, round 5, client 1/10: 79 updates
+[CLIENT] Buffer 0%, round 5, client 2/10: 78 updates
+[CLIENT] Buffer 0%, round 5, client 3/10: 78 updates
+[CLIENT] Buffer 0%, round 5, client 4/10: 79 updates
+[CLIENT] Buffer 0%, round 5, client 5/10: 78 updates
+[CLIENT] Buffer 0%, round 5, client 6/10: 79 updates
+[CLIENT] Buffer 0%, round 5, client 7/10: 79 updates
+[CLIENT] Buffer 0%, round 5, client 8/10: 78 updates
+[CLIENT] Buffer 0%, round 5, client 9/10: 80 updates
+[CLIENT] Buffer 0%, round 5, client 10/10: 78 updates
+Phase 2 - Round 5/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 21.96%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 20% Replay
+========================================================
+[REPLAY] Memoria real: 4995/25000 imágenes A.
+[CLIENT] Buffer 20%, round 1, client 1/10: 79 updates
+[CLIENT] Buffer 20%, round 1, client 2/10: 78 updates
+[CLIENT] Buffer 20%, round 1, client 3/10: 78 updates
+[CLIENT] Buffer 20%, round 1, client 4/10: 79 updates
+[CLIENT] Buffer 20%, round 1, client 5/10: 78 updates
+[CLIENT] Buffer 20%, round 1, client 6/10: 79 updates
+[CLIENT] Buffer 20%, round 1, client 7/10: 79 updates
+[CLIENT] Buffer 20%, round 1, client 8/10: 78 updates
+[CLIENT] Buffer 20%, round 1, client 9/10: 80 updates
+[CLIENT] Buffer 20%, round 1, client 10/10: 78 updates
+Phase 2 - Round 1/5 -> Group A Accuracy: 2.00% | Group B Accuracy: 0.22%
+[CLIENT] Buffer 20%, round 2, client 1/10: 79 updates
+[CLIENT] Buffer 20%, round 2, client 2/10: 78 updates
+[CLIENT] Buffer 20%, round 2, client 3/10: 78 updates
+[CLIENT] Buffer 20%, round 2, client 4/10: 79 updates
+[CLIENT] Buffer 20%, round 2, client 5/10: 78 updates
+[CLIENT] Buffer 20%, round 2, client 6/10: 79 updates
+[CLIENT] Buffer 20%, round 2, client 7/10: 79 updates
+[CLIENT] Buffer 20%, round 2, client 8/10: 78 updates
+[CLIENT] Buffer 20%, round 2, client 9/10: 80 updates
+[CLIENT] Buffer 20%, round 2, client 10/10: 78 updates
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 5.34%
+[CLIENT] Buffer 20%, round 3, client 1/10: 79 updates
+[CLIENT] Buffer 20%, round 3, client 2/10: 78 updates
+[CLIENT] Buffer 20%, round 3, client 3/10: 78 updates
+[CLIENT] Buffer 20%, round 3, client 4/10: 79 updates
+[CLIENT] Buffer 20%, round 3, client 5/10: 78 updates
+[CLIENT] Buffer 20%, round 3, client 6/10: 79 updates
+[CLIENT] Buffer 20%, round 3, client 7/10: 79 updates
+[CLIENT] Buffer 20%, round 3, client 8/10: 78 updates
+[CLIENT] Buffer 20%, round 3, client 9/10: 80 updates
+[CLIENT] Buffer 20%, round 3, client 10/10: 78 updates
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 12.48%
+[CLIENT] Buffer 20%, round 4, client 1/10: 79 updates
+[CLIENT] Buffer 20%, round 4, client 2/10: 78 updates
+[CLIENT] Buffer 20%, round 4, client 3/10: 78 updates
+[CLIENT] Buffer 20%, round 4, client 4/10: 79 updates
+[CLIENT] Buffer 20%, round 4, client 5/10: 78 updates
+[CLIENT] Buffer 20%, round 4, client 6/10: 79 updates
+[CLIENT] Buffer 20%, round 4, client 7/10: 79 updates
+[CLIENT] Buffer 20%, round 4, client 8/10: 78 updates
+[CLIENT] Buffer 20%, round 4, client 9/10: 80 updates
+[CLIENT] Buffer 20%, round 4, client 10/10: 78 updates
+Phase 2 - Round 4/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 16.60%
+[CLIENT] Buffer 20%, round 5, client 1/10: 79 updates
+[CLIENT] Buffer 20%, round 5, client 2/10: 78 updates
+[CLIENT] Buffer 20%, round 5, client 3/10: 78 updates
+[CLIENT] Buffer 20%, round 5, client 4/10: 79 updates
+[CLIENT] Buffer 20%, round 5, client 5/10: 78 updates
+[CLIENT] Buffer 20%, round 5, client 6/10: 79 updates
+[CLIENT] Buffer 20%, round 5, client 7/10: 79 updates
+[CLIENT] Buffer 20%, round 5, client 8/10: 78 updates
+[CLIENT] Buffer 20%, round 5, client 9/10: 80 updates
+[CLIENT] Buffer 20%, round 5, client 10/10: 78 updates
+Phase 2 - Round 5/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 19.64%
+
+===============================================================================================
+                    COMPARISON TABLE (SELECTED BUFFERS)
+===============================================================================================
+Method               | Group A (Before)   | Group A (After)    | Group B (After)    | Accuracy Loss  
+-----------------------------------------------------------------------------------------------
+No Replay            |             26.88% |              0.00% |             21.96% |        26.88 pp
+20% Replay           |             26.88% |              0.00% |             19.64% |        26.88 pp
+===============================================================================================
+
+[INFO] Chart successfully saved as 'group_a_accuracy_loss_up_to_20.png'
+
+===============================================================================================
+                    FINAL COMPARISON TABLE (SELECTED REPLAY BUFFERS)
+===============================================================================================
+Method               | Group A (Before)   | Group A (After)    | Group B (After)    | Accuracy Loss  
+-----------------------------------------------------------------------------------------------
+No Replay            |             26.88% |              0.00% |             21.96% |        26.88 pp
+20% Replay           |             26.88% |              0.00% |             19.64% |        26.88 pp
+===============================================================================================
+
+[INFO] Chart successfully saved as 'group_a_accuracy_loss_all_buffers.png'
+[AUDIT] Diagnósticos guardados en audit.json y pesos en audit_phase*.pt

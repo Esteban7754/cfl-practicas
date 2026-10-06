@@ -1,0 +1,14 @@
+{
+  "num_clients": 2,
+  "batch_size": 32,
+  "local_epochs": 1,
+  "num_rounds": 1,
+  "lr": 0.001,
+  "seed": 42,
+  "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
+  "device": "cpu",
+  "train_samples_per_group": 100,
+  "test_samples_per_group": 100,
+  "quick": true,
+  "torch_version": "2.14.1+cpu"
+}

@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision.models import resnet18
 import numpy as np
 from flwr_datasets import FederatedDataset
+from reproducibility import seed_everything
 
 # ------------------------------------------------------------------
 # 1. Configuration Setup
@@ -15,9 +16,12 @@ CONFIG = {
     "local_epochs": 1,
     "num_rounds": 5,
     "lr": 0.001,
+    "seed": 42,
+    "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
     "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 }
 
+seed_everything(CONFIG["seed"])
 print(f"Device in use: {CONFIG['device']}")
 
 # ------------------------------------------------------------------
@@ -25,7 +29,9 @@ print(f"Device in use: {CONFIG['device']}")
 # ------------------------------------------------------------------
 fds = FederatedDataset(
     dataset="uoft-cs/cifar100",
+    revision=CONFIG["dataset_revision"],
     partitioners={"train": CONFIG["num_clients"]},
+    seed=CONFIG["seed"],
 )
 
 group_a_classes = list(range(0, 50))

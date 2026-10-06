@@ -1,0 +1,47 @@
+VALIDATION: prueba piloto; aprendizaje mínimo, clases cubiertas y entrenamiento controlado.
+Device in use: cpu
+Using the latest cached version of the dataset since uoft-cs/cifar100 couldn't be found on the Hugging Face Hub (offline mode is enabled).
+Found the latest cached dataset configuration 'cifar100' at /cache/huggingface/datasets/uoft-cs___cifar100/cifar100/0.0.0/aadb3af77e9048adbea6b47c21a81e47dd092ae5 (last modified on Fri Oct  2 07:31:28 2026).
+
+========================================================
+  PHASE 1: TRAINING ON GROUP A (ONCE FOR ALL EXPERIMENTS)
+========================================================
+[INFO] Fase A reutilizada de: /workspace/global_model_phase1.pt
+[INFO] Precisión A antes de comparar replay: 27.20%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = No Replay
+========================================================
+Phase 2 - Round 1/3 -> Group A Accuracy: 2.20% | Group B Accuracy: 1.30%
+Phase 2 - Round 2/3 -> Group A Accuracy: 0.00% | Group B Accuracy: 4.50%
+Phase 2 - Round 3/3 -> Group A Accuracy: 0.00% | Group B Accuracy: 9.10%
+
+========================================================
+  RUNNING PHASE 2: Replay Buffer = 20% Replay
+========================================================
+Phase 2 - Round 1/3 -> Group A Accuracy: 1.90% | Group B Accuracy: 0.00%
+Phase 2 - Round 2/3 -> Group A Accuracy: 0.00% | Group B Accuracy: 4.10%
+Phase 2 - Round 3/3 -> Group A Accuracy: 0.00% | Group B Accuracy: 8.70%
+
+===============================================================================================
+                    COMPARISON TABLE (SELECTED BUFFERS)
+===============================================================================================
+Method               | Group A (Before)   | Group A (After)    | Group B (After)    | Accuracy Loss  
+-----------------------------------------------------------------------------------------------
+No Replay            |             27.20% |              0.00% |              9.10% |          27.20%
+20% Replay           |             27.20% |              0.00% |              8.70% |          27.20%
+===============================================================================================
+
+[INFO] Chart successfully saved as 'group_a_accuracy_loss_up_to_20.png'
+
+===============================================================================================
+                    FINAL COMPARISON TABLE (ALL REPLAY BUFFERS)
+===============================================================================================
+Method               | Group A (Before)   | Group A (After)    | Group B (After)    | Accuracy Loss  
+-----------------------------------------------------------------------------------------------
+No Replay            |             27.20% |              0.00% |              9.10% |          27.20%
+20% Replay           |             27.20% |              0.00% |              8.70% |          27.20%
+===============================================================================================
+
+[INFO] Chart successfully saved as 'group_a_accuracy_loss_all_buffers.png'
+[AUDIT] Diagnósticos guardados en audit.json y pesos en audit_phase*.pt
