@@ -32,6 +32,15 @@ class FedAvgTests(unittest.TestCase):
         for key in state:
             torch.testing.assert_close(avg[key], state[key])
 
+    @unittest.skipUnless(torch.cuda.is_available(), "sin GPU CUDA")
+    def test_keeps_the_device_of_the_weights(self):
+        # En CPU nunca falló; en GPU los coeficientes se creaban en CPU (Kaggle, 8-10-2026).
+        a = {"w": torch.tensor([1.0, 2.0], device="cuda")}
+        b = {"w": torch.tensor([3.0, 6.0], device="cuda")}
+        avg = fl_core.fedavg([a, b], weights=[1, 3])
+        self.assertEqual(avg["w"].device.type, "cuda")
+        torch.testing.assert_close(avg["w"].cpu(), torch.tensor([2.5, 5.0]))
+
     def test_rejects_invalid_input(self):
         with self.assertRaises(ValueError):
             fl_core.fedavg([])

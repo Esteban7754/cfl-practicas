@@ -62,7 +62,8 @@ def fedavg(state_dicts: Sequence[dict], weights: Optional[Sequence[float]] = Non
     for key in state_dicts[0]:
         reference = state_dicts[0][key]
         stacked = torch.stack([sd[key].detach().to(torch.float64) for sd in state_dicts], dim=0)
-        coeffs = torch.tensor([w / total for w in weights], dtype=torch.float64).view(-1, *([1] * reference.dim()))
+        coeffs = torch.tensor([w / total for w in weights], dtype=torch.float64,
+                              device=stacked.device).view(-1, *([1] * reference.dim()))
         mean = (stacked * coeffs).sum(dim=0)
         if reference.is_floating_point():
             averaged[key] = mean.to(reference.dtype)
