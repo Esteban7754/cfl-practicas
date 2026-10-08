@@ -58,6 +58,11 @@ class ArgumentTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             apply_args(parser.parse_args(["--buffers", "5", "15"]), {"seed": 42}, parser)
 
+    def test_equal_steps_is_the_default(self):
+        parser = build_parser("x")
+        self.assertTrue(parser.parse_args([]).equal_steps)
+        self.assertFalse(parser.parse_args(["--no-equal-steps"]).equal_steps)
+
     def test_overrides_and_default_output_dir(self):
         parser = build_parser("x")
         config = {"seed": 42, "num_rounds": 5, "local_epochs": 5}
