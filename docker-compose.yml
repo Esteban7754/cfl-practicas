@@ -10,7 +10,7 @@
 x-base: &base
   image: cfl-practicas:cpu
   build:
-    context: .
+    context: ${CFL_CONTEXTO:-.}
     args:
       TORCH_VARIANT: cpu
       CFL_REVISION: ${CFL_REVISION:-desconocida}
@@ -42,7 +42,7 @@ services:
     profiles: ["gpu"]
     image: cfl-practicas:gpu
     build:
-      context: .
+      context: ${CFL_CONTEXTO:-.}
       args:
         TORCH_VARIANT: cuda
         CFL_REVISION: ${CFL_REVISION:-desconocida}

@@ -54,7 +54,27 @@ function Test-NvidiaGpu {
     try { nvidia-smi -L *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
 
+# Docker no puede leer los archivos que OneDrive marca como "reparse point" ("invalid file
+# request" al construir). Se construye desde una copia normal del código fuera de OneDrive:
+# los archivos de git (incluidos los nuevos no ignorados), tal como están en la carpeta.
+function New-BuildContext {
+    $dest = Join-Path $env:LOCALAPPDATA "cfl-practicas\contexto-docker"
+    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+    $files = git -C $root -c core.quotepath=off ls-files --cached --others --exclude-standard
+    if ($LASTEXITCODE -ne 0 -or -not $files) { Write-Host "[ERROR] No se pudo listar el código con git." -ForegroundColor Red; exit 1 }
+    foreach ($f in $files) {
+        if ($f -match '\.(pt|png)$' -or $f -match '^(resultados|data)/') { continue }  # también en .dockerignore
+        $src = Join-Path $root $f
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+        $dst = Join-Path $dest $f
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+        [IO.File]::WriteAllBytes($dst, [IO.File]::ReadAllBytes($src))
+    }
+    return $dest
+}
+
 function Build-Image([string]$which) {
+    $env:CFL_CONTEXTO = New-BuildContext
     $env:CFL_REVISION = Get-Revision
     $env:BUILD_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     Write-Host "Construyendo cfl-practicas:$which (código $($env:CFL_REVISION)). La primera vez tarda unos minutos;" -ForegroundColor Cyan
