@@ -1,0 +1,149 @@
+Device in use: cpu
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Generating train split:   0%|          | 0/50000 [00:00<?, ? examples/s]
+Generating train split:  17%|█▋        | 8300/50000 [00:00<00:00, 82206.30 examples/s]
+Generating train split:  48%|████▊     | 23900/50000 [00:00<00:00, 125018.69 examples/s]
+Generating train split:  78%|███████▊  | 39100/50000 [00:00<00:00, 134083.08 examples/s]
+Generating train split: 100%|██████████| 50000/50000 [00:00<00:00, 133099.69 examples/s]
+
+Generating test split:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Generating test split: 100%|██████████| 10000/10000 [00:00<00:00, 118297.03 examples/s]
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 2000/10000 [00:00<00:00, 11399.21 examples/s]
+Filter:  40%|████      | 4000/10000 [00:00<00:00, 11222.50 examples/s]
+Filter:  60%|██████    | 6000/10000 [00:00<00:00, 11736.78 examples/s]
+Filter:  80%|████████  | 8000/10000 [00:00<00:00, 7955.47 examples/s] 
+Filter: 100%|██████████| 10000/10000 [00:01<00:00, 9005.44 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:01<00:00, 9383.99 examples/s]
+
+Filter:   0%|          | 0/10000 [00:00<?, ? examples/s]
+Filter:  10%|█         | 1000/10000 [00:00<00:01, 8541.36 examples/s]
+Filter:  30%|███       | 3000/10000 [00:00<00:00, 10878.92 examples/s]
+Filter:  50%|█████     | 5000/10000 [00:00<00:00, 11257.92 examples/s]
+Filter:  70%|███████   | 7000/10000 [00:00<00:00, 11530.75 examples/s]
+Filter:  90%|█████████ | 9000/10000 [00:00<00:00, 11614.27 examples/s]
+Filter: 100%|██████████| 10000/10000 [00:00<00:00, 11411.42 examples/s]
+
+--- PHASE 1: TRAINING ON GROUP A STARTED ---
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 10887.78 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11051.69 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 10876.43 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 9958.89 examples/s]
+Filter:  60%|██████    | 3000/5000 [00:00<00:00, 9466.39 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 9443.19 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 9419.35 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 9416.00 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11873.82 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11756.87 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11893.13 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11713.02 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12232.18 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12264.08 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12612.61 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12729.08 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12782.37 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11281.79 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12185.43 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12184.28 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11873.86 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11586.98 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11439.97 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 1000/5000 [00:00<00:00, 9422.40 examples/s]
+Filter:  60%|██████    | 3000/5000 [00:00<00:00, 11409.41 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 10461.46 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 10427.93 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12804.73 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 13081.63 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 13099.75 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11399.76 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11891.53 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11866.32 examples/s]
+Phase 1 - Round 1/5 -> Group A Accuracy: 2.36%
+Phase 1 - Round 2/5 -> Group A Accuracy: 3.50%
+Phase 1 - Round 3/5 -> Group A Accuracy: 15.62%
+Phase 1 - Round 4/5 -> Group A Accuracy: 22.80%
+Phase 1 - Round 5/5 -> Group A Accuracy: 26.88%
+
+--- PHASE 2: TRAINING ON GROUP B STARTED ---
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11007.33 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 9302.20 examples/s] 
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 9374.44 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 9448.27 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11283.12 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11736.45 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11486.44 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11571.39 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 11256.13 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11181.17 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 1000/5000 [00:00<00:00, 9833.48 examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 4697.30 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 7810.99 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 7800.44 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12320.28 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12569.94 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12533.88 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11848.89 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12290.57 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12231.89 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12197.42 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 10748.15 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 10433.29 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  20%|██        | 1000/5000 [00:00<00:00, 9819.90 examples/s]
+Filter:  60%|██████    | 3000/5000 [00:00<00:00, 10511.90 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11209.32 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 10875.58 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 11731.78 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12354.99 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 12065.94 examples/s]
+
+Filter:   0%|          | 0/5000 [00:00<?, ? examples/s]
+Filter:  40%|████      | 2000/5000 [00:00<00:00, 12048.53 examples/s]
+Filter:  80%|████████  | 4000/5000 [00:00<00:00, 12001.98 examples/s]
+Filter: 100%|██████████| 5000/5000 [00:00<00:00, 11480.17 examples/s]
+Phase 2 - Round 1/5 -> Group A Accuracy: 0.14% | Group B Accuracy: 3.44%
+Phase 2 - Round 2/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 4.28%
+Phase 2 - Round 3/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 9.56%
+Phase 2 - Round 4/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 17.52%
+Phase 2 - Round 5/5 -> Group A Accuracy: 0.00% | Group B Accuracy: 21.00%
+
+All Training Phases Completed Successfully!

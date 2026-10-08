@@ -61,6 +61,6 @@
     49
   ],
   "checkpoint_sha256": "4d98d450f61031ff29d1642d20227e5453ef2e5dc122893e1aed051ac22c5a77",
-  "provenance": "Reconstruido a partir de step_four.py y .run_logs/step_four.log; no es un manifiesto guardado durante el entrenamiento original",
+  "provenance": "Reconstruido a partir de legacy/step_four.py y resultados/historicos/run_logs/step_four.log; no es un manifiesto guardado durante el entrenamiento original",
   "phase1_test_accuracy_percent_from_log": 26.88
 }
