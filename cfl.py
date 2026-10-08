@@ -43,7 +43,10 @@ def new_output_dir(requested, default_name):
 
 
 def child_env(threads=None):
-    env = {**os.environ, "PYTHONPATH": str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    # PYTHONUNBUFFERED: sin él, fuera de Docker el progreso de cada ronda se queda retenido en el búfer
+    # y no llega a ejecucion.log ni a la pantalla hasta acumular varios KB.
+    env = {**os.environ, "PYTHONPATH": str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+           "PYTHONUNBUFFERED": "1"}
     if threads:
         env.update(OMP_NUM_THREADS=str(threads), MKL_NUM_THREADS=str(threads))
     return env
@@ -64,7 +67,9 @@ def run(command, log=None, env=None, dry_run=False):
             text=True, encoding="utf-8", errors="replace", bufsize=1) as process:
         for line in process.stdout:
             sys.stdout.write(line)
+            sys.stdout.flush()
             handle.write(line)
+            handle.flush()
     return process.returncode
 
 
