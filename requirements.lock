@@ -1,4 +1,4 @@
-# Pinned environment used here: Python 3.13.16 on Windows x64, PyTorch CPU.
+# Entorno fijado: Python 3.13 en el contenedor Linux de Docker (PyTorch CPU). Dockerfile.gpu reutiliza estas versiones con CUDA.
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 aiohappyeyeballs==2.7.1

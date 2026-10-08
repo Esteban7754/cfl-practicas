@@ -10,18 +10,29 @@
     Todas las variantes parten de los mismos pesos A, usan buffers anidados y hacen las mismas
     actualizaciones por cliente y ronda (--controlled-replay). Con varias semillas se ejecuta una
     carpeta por semilla y se resume con agregar_semillas.py.
+
+    Las ejecuciones nuevas normalizan las imágenes y usan aumento de datos. -ReuseCheckpoint
+    reutiliza global_model_phase1.pt, entrenado sin ellos, y por eso añade --no-normalize --no-augment.
+
+    -ReplayMix balanced hace que cada lote lleve una fracción fija de muestras del buffer
+    (-ReplayBatchFraction, 0.5 por defecto). -DistillWeight > 0 añade destilación sobre las clases A.
 .EXAMPLE
     .\comparar_replay.ps1
     .\comparar_replay.ps1 -Seeds 42,43,44 -Buffers 0,5,10,20
     .\comparar_replay.ps1 -ReuseCheckpoint -LocalEpochs 1 -OutputDir resultados/repeticion_1_epoca
+    .\comparar_replay.ps1 -Seeds 42,43,44 -Buffers 0,5,10,20 -ReplayMix balanced
+    .\comparar_replay.ps1 -Seeds 42,43,44 -Buffers 0,20 -ReplayMix balanced -DistillWeight 1
 #>
 param(
     [string]$OutputDir = '',
     [ValidateRange(1, 50)][int]$LocalEpochs = 5,
     [ValidateRange(1, 50)][int]$Rounds = 5,
     [int[]]$Seeds = @(42),
-    [ValidateSet(0, 5, 10, 15, 20, 25)][int[]]$Buffers = @(0, 20),
+    [ValidateRange(0, 99)][int[]]$Buffers = @(0, 20),
     [switch]$ReuseCheckpoint,
+    [ValidateSet('concat', 'balanced')][string]$ReplayMix = 'concat',
+    [ValidateRange(0.05, 0.95)][double]$ReplayBatchFraction = 0.5,
+    [ValidateRange(0, 100)][double]$DistillWeight = 0,
     [ValidateRange(1, 64)][int]$Threads = 4
 )
 
@@ -31,7 +42,9 @@ if ($ReuseCheckpoint -and ($LocalEpochs -ne 1 -or ($Seeds | Where-Object { $_ -n
     throw 'global_model_phase1.pt se entrenó con 1 época local y semilla 42; -ReuseCheckpoint solo es coherente con -LocalEpochs 1 -Seeds 42.'
 }
 if (-not $OutputDir) {
-    $OutputDir = "resultados/cifar100_completo_${LocalEpochs}epocas_" + (Get-Date -Format 'yyyy-MM-dd_HHmmss')
+    $variant = if ($ReplayMix -eq 'balanced') { "_balanced" } else { "" }
+    if ($DistillWeight -gt 0) { $variant += "_lwf" }
+    $OutputDir = "resultados/cifar100_completo_${LocalEpochs}epocas${variant}_" + (Get-Date -Format 'yyyy-MM-dd_HHmmss')
 }
 if ([System.IO.Path]::IsPathRooted($OutputDir)) { throw 'OutputDir debe ser una ruta relativa dentro del proyecto.' }
 $OutputDir = $OutputDir.Replace('\', '/')
@@ -56,7 +69,10 @@ foreach ($seed in $Seeds) {
     $experimentArguments = @('python', 'cifar100_three_buffer.py', '--controlled-replay', '--audit',
         '--seed', "$seed", '--buffers') + $bufferArguments + @(
         '--local-epochs', "$LocalEpochs", '--rounds', "$Rounds", '--output-dir', $runDir)
-    if ($ReuseCheckpoint) { $experimentArguments += @('--phase1-checkpoint', 'global_model_phase1.pt') }
+    $culture = [System.Globalization.CultureInfo]::InvariantCulture
+    $experimentArguments += @('--replay-mix', $ReplayMix, '--distill-weight', $DistillWeight.ToString($culture))
+    if ($ReplayMix -eq 'balanced') { $experimentArguments += @('--replay-batch-fraction', $ReplayBatchFraction.ToString($culture)) }
+    if ($ReuseCheckpoint) { $experimentArguments += @('--phase1-checkpoint', 'global_model_phase1.pt', '--no-normalize', '--no-augment') }
 
     Write-Host "=== Semilla $seed, $LocalEpochs épocas locales -> $runDir" -ForegroundColor Cyan
     docker run @containerOptions @experimentArguments 2>&1 | Tee-Object -FilePath (Join-Path $projectRoot "$runDir/ejecucion.log")

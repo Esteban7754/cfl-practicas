@@ -1,9 +1,11 @@
+# El contenedor monta la carpeta del proyecto; la imagen solo necesita requirements.lock.
 .git
+.backup
 .venv
 .runtime
 .setup
 __pycache__
 data
+resultados
+*.pt
 *.png
-results
-step_six_v1_results.txt

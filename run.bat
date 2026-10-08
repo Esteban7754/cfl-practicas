@@ -1,16 +1,38 @@
 @echo off
 chcp 65001 >nul
-setlocal enabledelayedexpansion
+setlocal
 
-:: Si se pasa un argumento (ej: run.bat step_four.py), se ejecuta directamente
-if not "%~1"=="" (
-    if "%~1"=="test" (
-        set SCRIPT=test_env.py
-    ) else (
-        set SCRIPT=%~1
-    )
-    goto direct_execute
+:: Lanzador para CMD / doble clic. Sin argumentos abre el menú; con argumentos,
+:: el primero es el script (o "test" / "unittest") y el resto se pasa a Python.
+::   run.bat test
+::   run.bat cifar100_three_buffer.py --quick --output-dir resultados\prueba
+::   run.bat legacy\step_four.py
+
+set "ROOT=%~dp0"
+if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+set "DOCKER_OPTS=--rm -e OMP_NUM_THREADS -e MKL_NUM_THREADS -v "%ROOT%:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace"
+
+docker info >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Docker no esta en ejecucion. Abre Docker Desktop y reintenta.
+    if "%~1"=="" pause
+    exit /b 1
 )
+
+if "%~1"=="" goto menu
+if /i "%~1"=="test" (
+    docker run %DOCKER_OPTS% cfl-practicas python verificar_entorno.py
+    exit /b %ERRORLEVEL%
+)
+if /i "%~1"=="unittest" (
+    docker run %DOCKER_OPTS% cfl-practicas python -m unittest -v
+    exit /b %ERRORLEVEL%
+)
+:: Las rutas con "\" se convierten a "/" para el contenedor Linux.
+set "ARGS=%*"
+set "ARGS=%ARGS:\=/%"
+docker run %DOCKER_OPTS% cfl-practicas python %ARGS%
+exit /b %ERRORLEVEL%
 
 :menu
 cls
@@ -18,99 +40,42 @@ echo ===========================================================================
 echo           APRENDIZAJE FEDERADO CONTINUO - MENU DE EJECUCION
 echo ==============================================================================
 echo.
-echo Selecciona el experimento que deseas ejecutar:
-echo.
-echo   [1] Verificacion rapida del entorno (test_env.py)
-echo   [2] CIFAR-100: Inicial sin replay (step_four.py)
-echo   [3] CIFAR-100: Buffers 0%%, 5%%, 10%%, 15%% y 20%% (step_six_v1.py)
-echo   [4] CIFAR-100: Buffers 0%%, 5%%, 10%%, 15%%, 20%% y 25%% (three_buffer_size.py)
-echo   [5] CIFAR-100: Fase A una vez, buffers 0%% a 25%% (three_buffer_v2.py)
-echo   [6] CIFAR-100: Comparativa completa 0%%, 5%%, 10%%, 15%%, 20%% y 25%% (cifar100_three_buffer.py)
-echo   [7] DomainNet: Cambio de dominio a bocetos (domainnet.py)
-echo   [8] MVTec AD: Clasificacion de anomalias (mvtecad_all_experiments.py)
-echo   [9] Abrir consola interactiva de Python en el contenedor
+echo   [1] Verificacion rapida del entorno (verificar_entorno.py)
+echo   [2] Tests unitarios
+echo   [3] CIFAR-100: comparativa de replay (cifar100_three_buffer.py)
+echo   [4] CIFAR-100: prueba funcional rapida (--quick)
+echo   [5] DomainNet: cambio de dominio a bocetos (domainnet.py)
+echo   [6] MVTec AD: clasificacion de categorias (mvtecad_all_experiments.py)
+echo   [7] legacy\step_four.py         [8] legacy\three_buffer_v2.py
+echo   [9] Consola interactiva en el contenedor
 echo   [0] Salir
 echo.
-echo ==============================================================================
-set /p OPTION="Introduce una opcion [1-9, 0]: "
-
-if "%OPTION%"=="1" (
-    set SCRIPT=test_env.py
-    goto execute
-)
-if "%OPTION%"=="2" (
-    set SCRIPT=step_four.py
-    goto execute
-)
-if "%OPTION%"=="3" (
-    set SCRIPT=step_six_v1.py
-    goto execute
-)
-if "%OPTION%"=="4" (
-    set SCRIPT=three_buffer_size.py
-    goto execute
-)
-if "%OPTION%"=="5" (
-    set SCRIPT=three_buffer_v2.py
-    goto execute
-)
-if "%OPTION%"=="6" (
-    set SCRIPT=cifar100_three_buffer.py
-    goto execute
-)
-if "%OPTION%"=="7" (
-    set SCRIPT=domainnet.py
-    goto execute
-)
-if "%OPTION%"=="8" (
-    set SCRIPT=mvtecad_all_experiments.py
-    goto execute
-)
-if "%OPTION%"=="9" goto interactive_shell
+set "OPTION="
+set /p OPTION="Introduce una opcion: "
+set "CMD="
+if "%OPTION%"=="1" set "CMD=verificar_entorno.py"
+if "%OPTION%"=="2" set "CMD=-m unittest -v"
+if "%OPTION%"=="3" set "CMD=cifar100_three_buffer.py"
+if "%OPTION%"=="4" set "CMD=cifar100_three_buffer.py --quick"
+if "%OPTION%"=="5" set "CMD=domainnet.py"
+if "%OPTION%"=="6" set "CMD=mvtecad_all_experiments.py"
+if "%OPTION%"=="7" set "CMD=legacy/step_four.py"
+if "%OPTION%"=="8" set "CMD=legacy/three_buffer_v2.py"
 if "%OPTION%"=="0" exit /b 0
-
-echo Opcion invalida.
-timeout /t 2 >nul
-goto menu
-
-:execute
-cls
-echo ==============================================================================
-echo Ejecutando: %SCRIPT%
-echo ==============================================================================
-echo.
-
-docker info >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Docker no esta en ejecucion. Por favor, abre Docker Desktop y reintenta.
-    pause
-    exit /b 1
+if "%OPTION%"=="9" (
+    docker run %DOCKER_OPTS% -it cfl-practicas bash
+    goto menu
 )
-
-docker run --rm -e OMP_NUM_THREADS -e MKL_NUM_THREADS -v "%~dp0:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python %SCRIPT%
-
+if not defined CMD (
+    echo Opcion invalida.
+    timeout /t 2 >nul
+    goto menu
+)
+cls
+echo Ejecutando: python %CMD%
 echo.
-echo ==============================================================================
+docker run %DOCKER_OPTS% cfl-practicas python %CMD%
+echo.
 echo Ejecucion finalizada.
-echo ==============================================================================
 pause
-goto menu
-
-:direct_execute
-docker info >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Docker no esta en ejecucion. Por favor, abre Docker Desktop y reintenta.
-    exit /b 1
-)
-if "%~1"=="test" (
-    docker run --rm -e OMP_NUM_THREADS -e MKL_NUM_THREADS -v "%~dp0:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python test_env.py
-) else (
-    docker run --rm -e OMP_NUM_THREADS -e MKL_NUM_THREADS -v "%~dp0:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python %*
-)
-exit /b %ERRORLEVEL%
-
-:interactive_shell
-cls
-echo Abriendo terminal interactiva con Python en Docker...
-docker run --rm -e OMP_NUM_THREADS -e MKL_NUM_THREADS -it -v "%~dp0:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas bash
 goto menu

@@ -2,8 +2,8 @@
 .SYNOPSIS
     Repite un experimento con varias semillas en Docker y resume media ± desviación típica.
 .EXAMPLE
-    .\repetir_semillas.ps1 -Script three_buffer_v2.py
-    .\repetir_semillas.ps1 -Script domainnet.py -Seeds 42,43,44,45,46 -ExtraArgs '--equal-steps'
+    .\repetir_semillas.ps1 -Script cifar100_three_buffer.py -ExtraArgs '--buffers','0','5','10','20'
+    .\repetir_semillas.ps1 -Script domainnet.py -Seeds 42,43,44,45,46 -ExtraArgs '--buffers','0','10','20'
     .\repetir_semillas.ps1 -Script cifar100_three_buffer.py -ExtraArgs '--local-epochs','5','--buffers','0','20'
 .NOTES
     Cada semilla se guarda en <OutputDir>\seed_<n>. Al final se ejecuta agregar_semillas.py,
@@ -11,8 +11,8 @@
 #>
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('step_six_v1.py', 'three_buffer_size.py', 'three_buffer_v2.py', 'cifar100_three_buffer.py',
-                 'domainnet.py', 'mvtecad_all_experiments.py')]
+    [ValidateSet('cifar100_three_buffer.py', 'domainnet.py', 'mvtecad_all_experiments.py',
+                 'legacy/three_buffer_v2.py')]
     [string]$Script,
     [int[]]$Seeds = @(42, 43, 44),
     [string]$OutputDir = '',

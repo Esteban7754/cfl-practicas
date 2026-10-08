@@ -1,20 +1,23 @@
-<#
+﻿<#
 .SYNOPSIS
-    Script de ejecución para el proyecto de Aprendizaje Federado Continuo.
+    Ejecuta los experimentos del proyecto dentro del contenedor Docker oficial.
 .DESCRIPTION
-    Permite ejecutar cualquier script de experimento dentro del contenedor Docker oficial,
-    o abrir un menú interactivo si no se especifican parámetros.
+    Sin argumentos abre un menú interactivo. Con argumentos, el primero es el script
+    (o "test" / "unittest") y el resto se pasa tal cual al script de Python.
+    Monta siempre la carpeta del proyecto, aunque se lance desde otra carpeta.
 .EXAMPLE
     .\run.ps1
-    .\run.ps1 step_four.py
-    .\run.ps1 cifar100_three_buffer.py
     .\run.ps1 test
+    .\run.ps1 unittest
+    .\run.ps1 cifar100_three_buffer.py --quick --output-dir resultados/prueba
+    .\run.ps1 legacy/step_four.py
 #>
-
 param (
-    [Parameter(Position=0, Mandatory=$false)]
-    [string]$Script = ""
+    [Parameter(Position = 0)][string]$Script = "",
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$ScriptArgs = @()
 )
+
+$projectRoot = $PSScriptRoot
 
 function Show-Menu {
     Clear-Host
@@ -22,82 +25,66 @@ function Show-Menu {
     Write-Host "          APRENDIZAJE FEDERADO CONTINUO - MENU DE EJECUCION                   " -ForegroundColor Cyan
     Write-Host "==============================================================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "Selecciona el experimento que deseas ejecutar:"
-    Write-Host ""
-    Write-Host "  [1] Verificación rápida del entorno (test_env.py)" -ForegroundColor Green
-    Write-Host "  [2] CIFAR-100: Inicial sin replay (step_four.py)"
-    Write-Host "  [3] CIFAR-100: Buffers 0%, 5%, 10%, 15% y 20% (step_six_v1.py)"
-    Write-Host "  [4] CIFAR-100: Buffers 0%, 5%, 10%, 15%, 20% y 25% (three_buffer_size.py)"
-    Write-Host "  [5] CIFAR-100: Fase A una vez, buffers 0% a 25% (three_buffer_v2.py)"
-    Write-Host "  [6] CIFAR-100: Comparativa completa 0%, 5%, 10%, 15%, 20% y 25% (cifar100_three_buffer.py)"
-    Write-Host "  [7] DomainNet: Cambio de dominio a bocetos (domainnet.py)"
-    Write-Host "  [8] MVTec AD: Clasificación de anomalías (mvtecad_all_experiments.py)"
-    Write-Host "  [9] Abrir consola interactiva de Python en el contenedor" -ForegroundColor Yellow
+    Write-Host "  [1] Verificación rápida del entorno (verificar_entorno.py)" -ForegroundColor Green
+    Write-Host "  [2] Tests unitarios (python -m unittest)" -ForegroundColor Green
+    Write-Host "  [3] CIFAR-100: comparativa de replay (cifar100_three_buffer.py)"
+    Write-Host "  [4] CIFAR-100: prueba funcional rápida (cifar100_three_buffer.py --quick)"
+    Write-Host "  [5] DomainNet: cambio de dominio a bocetos (domainnet.py)"
+    Write-Host "  [6] MVTec AD: clasificación de categorías (mvtecad_all_experiments.py)"
+    Write-Host "  [7] Scripts históricos (carpeta legacy/)"
+    Write-Host "  [9] Consola interactiva en el contenedor" -ForegroundColor Yellow
     Write-Host "  [0] Salir"
     Write-Host ""
-    Write-Host "==============================================================================" -ForegroundColor Cyan
-    
-    $opt = Read-Host "Introduce una opción [1-9, 0]"
+    $opt = Read-Host "Introduce una opción"
     switch ($opt) {
-        "1" { return "test_env.py" }
-        "2" { return "step_four.py" }
-        "3" { return "step_six_v1.py" }
-        "4" { return "three_buffer_size.py" }
-        "5" { return "three_buffer_v2.py" }
-        "6" { return "cifar100_three_buffer.py" }
-        "7" { return "domainnet.py" }
-        "8" { return "mvtecad_all_experiments.py" }
-        "9" { return "interactive" }
-        "0" { exit 0 }
-        default { 
-            Write-Host "Opción inválida." -ForegroundColor Red
-            Start-Sleep -Seconds 1
-            return Show-Menu
+        "1" { return @("verificar_entorno.py") }
+        "2" { return @("-m", "unittest", "-v") }
+        "3" { return @("cifar100_three_buffer.py") }
+        "4" { return @("cifar100_three_buffer.py", "--quick") }
+        "5" { return @("domainnet.py") }
+        "6" { return @("mvtecad_all_experiments.py") }
+        "7" {
+            Write-Host "  [a] legacy/step_four.py   [b] legacy/step_six_v1.py   [c] legacy/three_buffer_size.py   [d] legacy/three_buffer_v2.py"
+            switch (Read-Host "Script histórico") {
+                "a" { return @("legacy/step_four.py") }
+                "b" { return @("legacy/step_six_v1.py") }
+                "c" { return @("legacy/three_buffer_size.py") }
+                "d" { return @("legacy/three_buffer_v2.py") }
+                default { return Show-Menu }
+            }
         }
+        "9" { return @("interactive") }
+        "0" { exit 0 }
+        default { Write-Host "Opción inválida." -ForegroundColor Red; Start-Sleep -Seconds 1; return Show-Menu }
     }
 }
 
-# Comprobar Docker
-try {
-    $dockerInfo = docker info 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Docker Desktop no está en ejecución. Por favor, ábrelo y reintenta." -ForegroundColor Red
-        exit 1
-    }
-} catch {
-    Write-Host "[ERROR] Docker no está disponible en este sistema." -ForegroundColor Red
+docker info > $null 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Docker Desktop no está en ejecución. Ábrelo y reintenta." -ForegroundColor Red
     exit 1
 }
 
-# Obtener script a ejecutar
 if ([string]::IsNullOrWhiteSpace($Script)) {
-    $target = Show-Menu
+    $command = Show-Menu
+} elseif ($Script -eq "test") {
+    $command = @("verificar_entorno.py") + $ScriptArgs
+} elseif ($Script -eq "unittest") {
+    $command = @("-m", "unittest", "-v") + $ScriptArgs
 } else {
-    if ($Script -eq "test") {
-        $target = "test_env.py"
-    } else {
-        $target = $Script
-    }
+    $command = @($Script) + $ScriptArgs
 }
 
-if ($target -eq "interactive") {
-    Write-Host "Abriendo terminal interactiva en el contenedor..." -ForegroundColor Yellow
-    docker run --rm -it -v "${PWD}:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas bash
-} else {
-    Write-Host "==============================================================================" -ForegroundColor Cyan
-    Write-Host "Ejecutando: $target" -ForegroundColor Green
-    Write-Host "==============================================================================" -ForegroundColor Cyan
-    Write-Host ""
-    
-    # Comprobar si stdin es TTY o no
-    if ([System.Console]::IsInputRedirected) {
-        docker run --rm -v "${PWD}:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python $target
-    } else {
-        docker run --rm -it -v "${PWD}:/workspace" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python $target
-    }
-    
-    Write-Host ""
-    Write-Host "==============================================================================" -ForegroundColor Cyan
-    Write-Host "Ejecución finalizada." -ForegroundColor Cyan
-    Write-Host "==============================================================================" -ForegroundColor Cyan
+$options = @("--rm", "-v", "${projectRoot}:/workspace", "-v", "cfl-hf-cache:/cache/huggingface", "-w", "/workspace")
+foreach ($name in "OMP_NUM_THREADS", "MKL_NUM_THREADS") {
+    if (Test-Path "env:$name") { $options += @("-e", "$name") }
 }
+if (-not [System.Console]::IsInputRedirected) { $options += "-it" }
+
+if ($command[0] -eq "interactive") {
+    docker run @options cfl-practicas bash
+} else {
+    Write-Host "Ejecutando: python $($command -join ' ')" -ForegroundColor Green
+    docker run @options cfl-practicas python @command
+}
+exit $LASTEXITCODE

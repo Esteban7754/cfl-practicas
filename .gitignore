@@ -1,7 +1,15 @@
+# Entornos locales
 .venv/
 .runtime/
 .setup/
-.run_logs/
-data/
 __pycache__/
+.DS_Store
+Thumbs.db
+
+# Datos y pesos (los checkpoints pesan ~45 MB cada uno: guárdalos fuera de git)
+data/
 *.pt
+
+# Copias de seguridad locales y registros temporales
+.backup/
+.run_logs/

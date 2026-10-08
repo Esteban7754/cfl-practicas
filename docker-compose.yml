@@ -1,3 +1,6 @@
+# docker compose run --rm cfl python cifar100_three_buffer.py --quick
+# docker compose run --rm cfl python -m unittest -v
+# GPU (opcional): docker compose --profile gpu run --rm cfl-gpu python ...
 services:
   cfl:
     image: cfl-practicas
@@ -9,9 +12,36 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - MPLBACKEND=Agg
+      - PYTHONPATH=/workspace
+      - OMP_NUM_THREADS
+      - MKL_NUM_THREADS
     stdin_open: true
     tty: true
 
+  cfl-gpu:
+    profiles: ["gpu"]
+    image: cfl-practicas-gpu
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    volumes:
+      - .:/workspace
+      - cfl-hf-cache:/cache/huggingface
+    working_dir: /workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MPLBACKEND=Agg
+      - PYTHONPATH=/workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+# Docker Compose crea el volumen la primera vez (ya no hace falta «docker volume create»).
+# Se fija el nombre para compartir la caché con run.bat / run.ps1.
 volumes:
   cfl-hf-cache:
-    external: true
+    name: cfl-hf-cache
