@@ -16,10 +16,23 @@ from cifar100_validation import learning_problem
 import math
 
 
-def tensors(dataset):
+CIFAR100_MEAN = torch.tensor((0.5071, 0.4865, 0.4409)).view(1, 3, 1, 1)
+CIFAR100_STD = torch.tensor((0.2673, 0.2564, 0.2762)).view(1, 3, 1, 1)
+
+
+def tensors(dataset, normalize=False):
+    """Reconstruye los tensores sin usar el código del experimento.
+
+    ``normalize`` reproduce la normalización de CIFAR-100 que aplican por
+    defecto las ejecuciones nuevas (``config.json`` → ``normalize``); las
+    ejecuciones antiguas no la tienen.
+    """
     images = np.stack([np.asarray(row["img"]) for row in dataset])
     labels = [int(row["fine_label"]) for row in dataset]
-    return (torch.from_numpy(images).permute(0, 3, 1, 2).float() / 255).contiguous(), torch.tensor(labels)
+    x = (torch.from_numpy(images).permute(0, 3, 1, 2).float() / 255).contiguous()
+    if normalize:
+        x = (x - CIFAR100_MEAN) / CIFAR100_STD
+    return x, torch.tensor(labels)
 
 
 def image_hashes(dataset):
@@ -94,6 +107,7 @@ def main():
             print(f"COMPARACIÓN NO DISPONIBLE: {status['reason']}", flush=True)
             raise SystemExit(2)
     torch.set_num_threads(4)
+    normalize = bool(config.get("normalize", False))
 
     test = load_dataset("uoft-cs/cifar100", revision=config["dataset_revision"], split="test")
     # Flower 0.6.1 baraja TODOS los splits antes de filtrar o particionar.
@@ -116,7 +130,7 @@ def main():
         keep_indices_by_group[name] = [index for index, row in enumerate(group)
                                       if hashlib.sha256(np.asarray(row["img"]).tobytes()).hexdigest()
                                       not in official_train_hashes]
-        x, y = tensors(group)
+        x, y = tensors(group, normalize)
         result["test_groups"][name] = {
             "samples": len(group), "classes_present": len(set(y.tolist())),
             "label_counts": dict(Counter(y.tolist())), "image_shape": list(x.shape),
@@ -133,7 +147,7 @@ def main():
     if metrics_path.name == "results.csv":
         assert completed_buffers == buffers
     buffers = completed_buffers
-    tensors_by_group = {name: tensors(group) for name, group in test_groups.items()}
+    tensors_by_group = {name: tensors(group, normalize) for name, group in test_groups.items()}
 
     for phase, filename in [("phase1", "audit_phase1.pt")] + [
         (f"phase2_{pct}", f"audit_phase2_{pct}.pt") for pct in buffers
@@ -273,7 +287,7 @@ def main():
     if config.get("validation"):
         result["validation"] = json.loads((args.audit_dir / "validation.json").read_text())
         result["training_review"] = {}
-        train_b_images, train_b_labels = zip(*(tensors(train_groups[f"client_{client}_B"]) for client in range(config["num_clients"])))
+        train_b_images, train_b_labels = zip(*(tensors(train_groups[f"client_{client}_B"], normalize) for client in range(config["num_clients"])))
         all_b_images, all_b_labels = torch.cat(train_b_images), torch.cat(train_b_labels)
         for percent in buffers:
             model = new_model()
@@ -285,7 +299,7 @@ def main():
                 for client in range(config["num_clients"]):
                     group = train_groups[f"client_{client}_A"]
                     indices = balanced_order(group["fine_label"], config["seed"] + client)[:len(group) * percent // 100]
-                    replay_xy.append(tensors(group.select(indices)))
+                    replay_xy.append(tensors(group.select(indices), normalize))
                 replay_metrics = evaluate(model, torch.cat([xy[0] for xy in replay_xy]), torch.cat([xy[1] for xy in replay_xy]))
             review_config = {**config, "min_training_accuracy_percent": config.get("min_training_accuracy_percent", 50.0)}
             problem = learning_problem(result["evaluations"][f"phase2_{percent}"]["B"]["accuracy_percent"],
@@ -307,7 +321,7 @@ def main():
     # No se confunde esta precisión de entrenamiento con la de test.
     torch.manual_seed(config["seed"])
     model = new_model()
-    images, labels = tensors(train_groups["client_0_A"].select(range(32)))
+    images, labels = tensors(train_groups["client_0_A"].select(range(32)), normalize)
     before = evaluate(model, images, labels)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
     losses = []

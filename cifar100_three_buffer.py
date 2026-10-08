@@ -1,540 +1,472 @@
-import os
+"""CIFAR-100 federado continuo: fase A (clases 0-49) y fase B (50-99) con replay.
+
+Perfiles:
+  (por defecto)  datos completos, 10 clientes; replay controlado (mismos pesos
+                 iniciales, buffers anidados y mismo número de actualizaciones).
+  --quick        prueba funcional mínima; no sirve para comparar.
+  --validation   piloto reducido con controles de aprendizaje.
+
+Variantes de replay (combinables):
+  --replay-mix concat     diseño original: B y buffer barajados juntos.
+  --replay-mix balanced   cada lote lleva una proporción fija de muestras del
+                          buffer (--replay-batch-fraction, 0.5 por defecto).
+  --distill-weight L      añade destilación (LwF) sobre los logits de A.
+
+Preprocesado: normalización con las medias de CIFAR-100 y aumento de datos
+(recorte con relleno y volteo) activados por defecto; --no-normalize y
+--no-augment reproducen el protocolo antiguo (necesario para reutilizar
+global_model_phase1.pt, entrenado sin ellos).
+"""
+
 import argparse
-import csv
-import json
-import hashlib
-from collections import Counter
-from pathlib import Path
-import math
-import gc
 import copy
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, ConcatDataset
-from torchvision.models import resnet18
-import numpy as np
-import matplotlib.pyplot as plt
-from flwr_datasets import FederatedDataset
-import uuid
+import csv
+import gc
+import hashlib
+import json
+import os
+from collections import Counter
 from datetime import datetime
-from reproducibility import seed_everything
+from pathlib import Path
+
+import torch
+
+import fl_core
 from cifar100_sampling import balanced_order, balanced_subset
 from cifar100_validation import learning_problem, validate_training_contract
+from experiment_common import plot_loss
+from reproducibility import seed_everything
 
-# ------------------------------------------------------------------
-# 1. Configuration Setup
-# ------------------------------------------------------------------
-CONFIG = {
-    "num_clients": 10,
-    "batch_size": 32,
-    "local_epochs": 10,
-    "num_rounds": 5,
-    "lr": 0.001,
-    "seed": 42,
-    "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
-    "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-}
+GROUP_A = list(range(0, 50))
+GROUP_B = list(range(50, 100))
+DATASET = "uoft-cs/cifar100"
 
-parser = argparse.ArgumentParser(description="Comparativa CIFAR-100 con todos los buffers")
-profiles = parser.add_mutually_exclusive_group()
-profiles.add_argument("--quick", action="store_true", help="Prueba funcional reducida con datos reales; no sirve para comparar precisión")
-profiles.add_argument("--validation", action="store_true", help="Prueba piloto equilibrada con controles de aprendizaje, muestreo y presupuesto de entrenamiento")
-parser.add_argument("--output-dir", help="Directorio para nuevos resultados, sin sobrescribir los anteriores")
-parser.add_argument("--audit", action="store_true", help="Guarda diagnósticos y pesos para comprobar las métricas de forma independiente")
-parser.add_argument("--phase1-checkpoint", type=Path, help="Reutiliza unos pesos de fase A, verificando su precisión")
-parser.add_argument("--buffers", nargs="+", type=int, choices=[0, 5, 10, 15, 20, 25], default=[0, 5, 10, 15, 20, 25], help="Porcentajes a comparar")
-parser.add_argument("--rounds", type=int, help="Sobrescribe el número de rondas por fase")
-parser.add_argument("--local-epochs", type=int, help="Sobrescribe las épocas locales")
-parser.add_argument("--controlled-replay", action="store_true", help="Misma semilla, buffers anidados y mismas actualizaciones con los datos completos")
-parser.add_argument("--seed", type=int, help="Semilla del experimento (por defecto 42). Repite con varias para medir la variabilidad")
-parser.add_argument("--checkpoint-manifest", type=Path, help="Configuración del conjunto A aprendido por el checkpoint")
-args = parser.parse_args()
-if 0 not in args.buffers or len(args.buffers) != len(set(args.buffers)):
-    parser.error("--buffers debe incluir 0 y no repetir porcentajes")
-args.buffers.sort()
-if args.phase1_checkpoint:
-    args.phase1_checkpoint = args.phase1_checkpoint.resolve()
-    if not args.phase1_checkpoint.is_file():
-        parser.error("No existe el checkpoint de fase A")
-if args.quick:
-    CONFIG.update(num_clients=2, local_epochs=1, num_rounds=1)
-    CONFIG.update(train_samples_per_group=100, test_samples_per_group=100)
-    print("QUICK TEST: muestras reducidas; las precisiones no son resultados del experimento completo.")
-if args.validation:
-    CONFIG.update(num_clients=2, local_epochs=3, num_rounds=3)
-    CONFIG.update(train_samples_per_group=500, test_samples_per_group=1000,
-                  sampling="balanced", min_base_accuracy_percent=10.0,
-                  min_new_task_accuracy_percent=8.0, min_training_accuracy_percent=50.0,
-                  equal_optimizer_steps=True)
-    print("VALIDATION: prueba piloto; aprendizaje mínimo, clases cubiertas y entrenamiento controlado.")
-for argument, key in ((args.rounds, "num_rounds"), (args.local_epochs, "local_epochs")):
-    if argument is not None:
-        if argument < 1:
-            parser.error("Las rondas y épocas deben ser positivas")
-        CONFIG[key] = argument
-if args.seed is not None:
-    CONFIG["seed"] = args.seed
-controlled_replay = args.validation or args.controlled_replay
-checkpoint_contract = None
-if args.phase1_checkpoint:
-    candidates = [args.checkpoint_manifest] if args.checkpoint_manifest else [
-        args.phase1_checkpoint.with_suffix(".config.json"), args.phase1_checkpoint.parent / "config.json"]
-    manifest_path = next((candidate for candidate in candidates if candidate and candidate.is_file()), None)
-    if manifest_path is None:
-        parser.error("El checkpoint necesita su configuración de entrenamiento A (--checkpoint-manifest); no se puede suponer el tamaño de su replay")
-    checkpoint_contract = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-    try:
-        validate_training_contract(CONFIG, checkpoint_contract)
-    except ValueError as error:
-        parser.error(str(error) + ". Usa los mismos datos A y clientes; no recortes la memoria de un checkpoint completo.")
-    checkpoint_sha256 = hashlib.sha256(args.phase1_checkpoint.read_bytes()).hexdigest()
-    if checkpoint_contract.get("checkpoint_sha256") and checkpoint_contract["checkpoint_sha256"] != checkpoint_sha256:
-        parser.error("El manifiesto no corresponde al SHA-256 de este checkpoint")
-if not args.output_dir:
-    # Nunca escribir en la raíz: así no se sobrescriben los gráficos históricos.
-    args.output_dir = os.path.join("resultados", f"cifar100_three_buffer_seed{CONFIG['seed']}_{datetime.now():%Y-%m-%d_%H%M%S}")
-os.makedirs(args.output_dir, exist_ok=True)
-os.chdir(args.output_dir)
-print(f"[INFO] Resultados en: {os.getcwd()}")
-with open("config.json", "w", encoding="utf-8") as config_file:
-    json.dump({**CONFIG, "quick": args.quick, "validation": args.validation,
-               "audit": args.audit, "buffers": args.buffers, "controlled_replay": controlled_replay,
-               "phase1_training_contract": checkpoint_contract, "torch_version": torch.__version__,
-               "cpu_threads": torch.get_num_threads(),
-               "phase1_checkpoint": str(args.phase1_checkpoint) if args.phase1_checkpoint else None,
-               "phase1_checkpoint_sha256": hashlib.sha256(args.phase1_checkpoint.read_bytes()).hexdigest() if args.phase1_checkpoint else None}, config_file, indent=2)
 
-seed_everything(CONFIG["seed"])
-print(f"Device in use: {CONFIG['device']}")
-audit = {"datasets": [], "training": [], "evaluation": [], "phase2_initial_weights": {}}
-audit_context = {}
-round_history = []
-validation_status = {"comparison_valid": False, "profile": "quick" if args.quick else "validation" if args.validation else "full",
-                     "reason": "Prueba funcional sin validación de aprendizaje" if args.quick else "Pendiente de completar"}
-
-def save_validation_status():
-    with open("validation.json", "w", encoding="utf-8") as status_file:
-        json.dump(validation_status, status_file, indent=2)
-
-def save_audit():
-    if args.audit:
-        with open("audit.json", "w", encoding="utf-8") as audit_file:
-            json.dump(audit, audit_file, indent=2)
-
-save_validation_status()
-
-def weights_digest(model):
-    digest = hashlib.sha256()
-    for key, tensor in model.state_dict().items():
-        digest.update(key.encode("utf-8"))
-        digest.update(tensor.detach().cpu().numpy().tobytes())
-    return digest.hexdigest()
-
-# ------------------------------------------------------------------
-# 2. Data Preparation & Filtering
-# ------------------------------------------------------------------
-fds = FederatedDataset(
-    dataset="uoft-cs/cifar100",
-    revision=CONFIG["dataset_revision"],
-    partitioners={"train": CONFIG["num_clients"]},
-    seed=CONFIG["seed"],
-)
-
-group_a_classes = list(range(0, 50))
-group_b_classes = list(range(50, 100))
-
-def filter_by_classes(partition, class_labels, sample_limit=None):
-    allowed_classes = set(class_labels)
-    label_col = "fine_label" if "fine_label" in partition.column_names else "label"
-    filtered = partition.filter(lambda example: example[label_col] in allowed_classes)
-    if sample_limit is not None and len(filtered) > sample_limit:
-        if CONFIG.get("sampling") == "balanced":
-            filtered = balanced_subset(filtered, sample_limit, CONFIG["seed"])
-        else:
-            filtered = filtered.shuffle(seed=CONFIG["seed"]).select(range(sample_limit))
-    if args.audit:
-        counts = Counter(filtered[label_col])
-        audit["datasets"].append({
-            "context": dict(audit_context), "group": "A" if min(class_labels) == 0 else "B",
-            "samples": len(filtered), "classes_present": len(counts), "label_counts": dict(counts),
-        })
-    return filtered
-
-def transform_batch(batch):
-    images = [
-        torch.tensor(np.array(img), dtype=torch.float32).permute(2, 0, 1) / 255.0 
-        for img in batch["img"]
-    ]
-    labels = torch.tensor(batch["fine_label"] if "fine_label" in batch else batch["label"], dtype=torch.long)
-    return {"img": images, "label": labels}
-
-def collate_fn(batch):
-    imgs = torch.stack([x["img"] for x in batch])
-    labels = torch.tensor([x["label"] for x in batch])
-    return imgs, labels
-
-# Prepare Test Loaders for Group A and Group B
-test_dataset = fds.load_split("test")
-
-test_group_a = filter_by_classes(test_dataset, group_a_classes, CONFIG.get("test_samples_per_group"))
-test_group_b = filter_by_classes(test_dataset, group_b_classes, CONFIG.get("test_samples_per_group"))
-
-test_loader_a = DataLoader(
-    test_group_a.with_transform(transform_batch), 
-    batch_size=CONFIG["batch_size"], 
-    collate_fn=collate_fn
-)
-
-test_loader_b = DataLoader(
-    test_group_b.with_transform(transform_batch), 
-    batch_size=CONFIG["batch_size"], 
-    collate_fn=collate_fn
-)
-
-# ------------------------------------------------------------------
-# 3. Helper Functions
-# ------------------------------------------------------------------
-def get_model():
-    model = resnet18(num_classes=100)
-    model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-    model.maxpool = nn.Identity()
-    return model
-
-def train_local(model, train_loader, epochs, lr, device, max_steps=None):
-    model.train()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
-    if args.audit:
-        before = model.fc.weight.detach().clone()
-        losses = []
-        labels_seen = Counter()
-    
-    steps = 0
-    for _ in range(epochs):
-        for imgs, labels in train_loader:
-            imgs, labels = imgs.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(imgs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            steps += 1
-            if args.audit:
-                if not torch.isfinite(loss):
-                    raise RuntimeError("La pérdida de entrenamiento no es finita")
-                losses.append(loss.item())
-                labels_seen.update(labels.detach().cpu().tolist())
-            if max_steps is not None and steps >= max_steps:
-                break
-        if max_steps is not None and steps >= max_steps:
-            break
-
-    if args.audit:
-        audit["training"].append({
-            "context": dict(audit_context), "optimizer_steps": len(losses),
-            "samples_processed": sum(labels_seen.values()), "classes_seen": len(labels_seen),
-            "label_counts": dict(labels_seen), "batch_losses": losses,
-            "fc_weight_delta_l2": (model.fc.weight.detach() - before).norm().item(),
-        })
-            
-    return model.state_dict()
-
-def evaluate(model, test_loader, device):
-    model.eval()
-    correct = 0
-    total = 0
-    if args.audit:
-        prediction_counts = Counter()
-        target_counts = Counter()
-        loss_sum = 0.0
-    with torch.no_grad():
-        for imgs, labels in test_loader:
-            imgs, labels = imgs.to(device), labels.to(device)
-            outputs = model(imgs)
-            _, predicted = torch.max(outputs, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-            if args.audit:
-                prediction_counts.update(predicted.detach().cpu().tolist())
-                target_counts.update(labels.detach().cpu().tolist())
-                loss_sum += nn.functional.cross_entropy(outputs, labels, reduction="sum").item()
-    if args.audit:
-        if total == 0:
-            raise RuntimeError("La evaluación no contiene muestras")
-        audit["evaluation"].append({
-            "context": dict(audit_context), "correct": correct, "total": total,
-            "accuracy_percent": 100 * correct / total, "mean_cross_entropy": loss_sum / total,
-            "prediction_counts": dict(prediction_counts), "target_counts": dict(target_counts),
-        })
-    return correct / total if total > 0 else 0.0
-
-def clear_memory():
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-def print_table(title, results_list):
-    print("\n" + "="*95)
-    print(f"                    {title}")
-    print("="*95)
-    print(f"{'Method':<20} | {'Group A (Before)':<18} | {'Group A (After)':<18} | {'Group B (After)':<18} | {'Accuracy Loss':<15}")
-    print("-" * 95)
-    for res in results_list:
-        print(f"{res['fraction']:<20} | {res['step3_acc_a']:>17.2f}% | {res['step4_acc_a']:>17.2f}% | {res['step4_acc_b']:>17.2f}% | {res['loss_a']:>12.2f} pp")
-    print("="*95)
-
-def plot_and_save_chart(results_list, filename, title_text):
-    if args.quick:
-        print("[INFO] Prueba funcional: se omite el gráfico comparativo porque no valida aprendizaje.")
-        return
-    methods = [res['fraction'] for res in results_list]
-    accuracy_losses = [res['loss_a'] for res in results_list]
-    colors = ['#e74c3c', '#3498db', '#f1c40f', '#2ecc71', '#e67e22', '#9b59b6'][:len(results_list)]
-
-    plt.figure(figsize=(9, 5.5), dpi=300)
-    bars = plt.bar(methods, accuracy_losses, color=colors, width=0.45, edgecolor='black', linewidth=1)
-
-    plt.title(title_text, fontsize=14, fontweight='bold', pad=15)
-    plt.xlabel('Method', fontsize=12, labelpad=10)
-    plt.ylabel('Accuracy Loss (percentage points)', fontsize=12, labelpad=10)
-    plt.ylim(min(0, min(accuracy_losses) - 4), max(0, max(accuracy_losses)) + 5)
-    plt.axhline(0, color='black', linewidth=0.8)
-    plt.grid(axis='y', linestyle='--', alpha=0.5)
-
-    for bar in bars:
-        yval = bar.get_height()
-        # Las pérdidas negativas (A mejora) se etiquetan por debajo de la barra.
-        plt.text(bar.get_x() + bar.get_width() / 2.0, yval + (0.7 if yval >= 0 else -0.7), f'{yval:.2f} pp',
-                 ha='center', va='bottom' if yval >= 0 else 'top', fontweight='bold')
-
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    print(f"\n[INFO] Chart successfully saved as '{filename}'")
-    plt.close()
-
-# ------------------------------------------------------------------
-# 4. PHASE 1: Single Base Training on Group A
-# ------------------------------------------------------------------
-print("\n========================================================")
-print("  PHASE 1: TRAINING ON GROUP A (ONCE FOR ALL EXPERIMENTS)")
-print("========================================================")
-
-global_model = get_model().to(CONFIG["device"])
-if args.phase1_checkpoint:
-    global_model.load_state_dict(torch.load(args.phase1_checkpoint, map_location=CONFIG["device"], weights_only=True))
-    print(f"[INFO] Fase A reutilizada de: {args.phase1_checkpoint}")
-client_group_a_datasets = {}
-client_group_b_datasets = {}
-
-for client_id in range(CONFIG["num_clients"]):
-    audit_context.update(phase=1, client=client_id)
-    client_partition = fds.load_partition(partition_id=client_id, split="train")
-    client_group_a_datasets[client_id] = filter_by_classes(client_partition, group_a_classes, CONFIG.get("train_samples_per_group"))
-    if controlled_replay:
-        client_group_b_datasets[client_id] = filter_by_classes(client_partition, group_b_classes, CONFIG.get("train_samples_per_group"))
-
-data_manifest = {"clients": [{"client": client, "a_samples": len(dataset),
-                             "b_samples": len(client_group_b_datasets[client]) if client in client_group_b_datasets else None}
-                            for client, dataset in client_group_a_datasets.items()],
-                 "total_a_samples": sum(len(dataset) for dataset in client_group_a_datasets.values())}
-with open("data_manifest.json", "w", encoding="utf-8") as manifest_file:
-    json.dump(data_manifest, manifest_file, indent=2)
-print(f"[DATA] El buffer se calcula sobre {data_manifest['total_a_samples']} imágenes A en total.")
-
-for r in range(0 if args.phase1_checkpoint else CONFIG["num_rounds"]):
-    local_weights = []
-    
-    for client_id in range(CONFIG["num_clients"]):
-        audit_context.update(phase=1, round=r + 1, client=client_id)
-        client_group_a = client_group_a_datasets[client_id]
-        
-        train_loader = DataLoader(
-            client_group_a.with_transform(transform_batch), 
-            batch_size=CONFIG["batch_size"], 
-            shuffle=True, 
-            collate_fn=collate_fn
-        )
-        
-        local_model = get_model().to(CONFIG["device"])
-        local_model.load_state_dict(global_model.state_dict())
-        
-        w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
-        local_weights.append(w)
-    
-    avg_weights = {}
-    for key in local_weights[0].keys():
-        target_dtype = local_weights[0][key].dtype
-        stacked_weights = torch.stack([w[key].to(torch.float32) for w in local_weights], dim=0)
-        avg_tensor = stacked_weights.mean(dim=0)
-        avg_weights[key] = avg_tensor.to(target_dtype)
-
-    global_model.load_state_dict(avg_weights)
-    acc_a = evaluate(global_model, test_loader_a, CONFIG["device"])
-    print(f"Phase 1 - Round {r+1}/{CONFIG['num_rounds']} -> Group A Accuracy: {acc_a * 100:.2f}%")
-
-base_group_a_weights = copy.deepcopy(global_model.state_dict())
-base_acc_a = evaluate(global_model, test_loader_a, CONFIG["device"]) * 100
-print(f"[INFO] Precisión A antes de comparar replay: {base_acc_a:.2f}%")
-validation_status["base_accuracy_a_percent"] = base_acc_a
-if args.validation and base_acc_a < CONFIG["min_base_accuracy_percent"]:
-    validation_status["reason"] = "Aprendizaje insuficiente en A; se cancela la comparación de replay"
-    save_validation_status()
-    save_audit()
-    raise RuntimeError(validation_status["reason"])
-if args.audit:
-    torch.save(base_group_a_weights, "audit_phase1.pt")
-    audit["phase1_weights_sha256"] = weights_digest(global_model)
-    save_audit()
-
-# ------------------------------------------------------------------
-# 5. PHASE 2: Runner Function for Replay Buffer Experiments
-# ------------------------------------------------------------------
-def run_phase2_experiment(replay_fraction):
-    if controlled_replay:
-        seed_everything(CONFIG["seed"])
-    fraction_label = "No Replay" if replay_fraction == 0.0 else f"{int(replay_fraction * 100)}% Replay"
-    print(f"\n========================================================")
-    print(f"  RUNNING PHASE 2: Replay Buffer = {fraction_label}")
-    print(f"========================================================")
-
-    global_model = get_model().to(CONFIG["device"])
-    global_model.load_state_dict(copy.deepcopy(base_group_a_weights))
-    if args.audit:
-        audit["phase2_initial_weights"][str(replay_fraction)] = weights_digest(global_model)
-
-    client_replay_buffers = {}
-    for client_id in range(CONFIG["num_clients"]):
-        client_group_a = client_group_a_datasets[client_id]
-        buffer_size = int(len(client_group_a) * replay_fraction)
-        if buffer_size > 0:
-            if controlled_replay:
-                label_col = "fine_label" if "fine_label" in client_group_a.column_names else "label"
-                shuffled_indices = balanced_order(client_group_a[label_col], CONFIG["seed"] + client_id)[:buffer_size]
-            else:
-                shuffled_indices = np.random.choice(len(client_group_a), size=buffer_size, replace=False)
-            client_replay_buffers[client_id] = client_group_a.select(shuffled_indices)
-        else:
-            client_replay_buffers[client_id] = None
-
-    replay_total = sum(len(dataset) for dataset in client_replay_buffers.values() if dataset is not None)
-    audit.setdefault("replay_memory", {})[str(int(replay_fraction * 100))] = {
-        "a_pool_samples": data_manifest["total_a_samples"], "buffer_samples": replay_total,
-        "actual_fraction": replay_total / data_manifest["total_a_samples"],
-        "per_client": [{"client": client, "a_samples": len(client_group_a_datasets[client]),
-                        "buffer_samples": len(dataset) if dataset is not None else 0}
-                       for client, dataset in client_replay_buffers.items()]}
-    print(f"[REPLAY] Memoria real: {replay_total}/{data_manifest['total_a_samples']} imágenes A.")
-
-    for r in range(CONFIG["num_rounds"]):
-        local_weights = []
-        
-        for client_id in range(CONFIG["num_clients"]):
-            audit_context.clear()
-            audit_context.update(phase=2, replay_fraction=replay_fraction, round=r + 1, client=client_id)
-            client_partition = fds.load_partition(partition_id=client_id, split="train")
-            client_group_b = client_group_b_datasets[client_id] if controlled_replay else filter_by_classes(client_partition, group_b_classes, CONFIG.get("train_samples_per_group"))
-            
-            datasets_to_combine = [client_group_b.with_transform(transform_batch)]
-            
-            if client_replay_buffers[client_id] is not None:
-                datasets_to_combine.append(client_replay_buffers[client_id].with_transform(transform_batch))
-            
-            combined_dataset = ConcatDataset(datasets_to_combine)
-            
-            train_loader = DataLoader(
-                combined_dataset, 
-                batch_size=CONFIG["batch_size"], 
-                shuffle=True, 
-                collate_fn=collate_fn
-            )
-            
-            local_model = get_model().to(CONFIG["device"])
-            local_model.load_state_dict(global_model.state_dict())
-            
-            max_steps = math.ceil(len(client_group_b) / CONFIG["batch_size"]) * CONFIG["local_epochs"] if controlled_replay else None
-            print(f"[CLIENT] Buffer {int(replay_fraction * 100)}%, round {r + 1}, client {client_id + 1}/{CONFIG['num_clients']}: {max_steps or 'epoch budget'} updates", flush=True)
-            w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"], max_steps=max_steps)
-            local_weights.append(w)
-        
-        avg_weights = {}
-        for key in local_weights[0].keys():
-            target_dtype = local_weights[0][key].dtype
-            stacked_weights = torch.stack([w[key].to(torch.float32) for w in local_weights], dim=0)
-            avg_tensor = stacked_weights.mean(dim=0)
-            avg_weights[key] = avg_tensor.to(target_dtype)
-
-        global_model.load_state_dict(avg_weights)
-        
-        acc_a = evaluate(global_model, test_loader_a, CONFIG["device"])
-        acc_b = evaluate(global_model, test_loader_b, CONFIG["device"])
-        
-        print(f"Phase 2 - Round {r+1}/{CONFIG['num_rounds']} -> Group A Accuracy: {acc_a * 100:.2f}% | Group B Accuracy: {acc_b * 100:.2f}%")
-        round_history.append({"replay_percent": int(replay_fraction * 100), "round": r + 1,
-                              "accuracy_a_percent": acc_a * 100, "accuracy_b_percent": acc_b * 100})
-        with open("history.csv", "w", newline="", encoding="utf-8") as history_file:
-            writer = csv.DictWriter(history_file, fieldnames=list(round_history[0]))
-            writer.writeheader()
-            writer.writerows(round_history)
-
-    acc_a_after_step4 = evaluate(global_model, test_loader_a, CONFIG["device"]) * 100
-    acc_b_after_step4 = evaluate(global_model, test_loader_b, CONFIG["device"]) * 100
-    if args.audit:
-        torch.save(global_model.state_dict(), f"audit_phase2_{int(replay_fraction * 100)}.pt")
-
-    training_metrics = {}
-    if args.validation:
-        training_b = ConcatDataset([dataset.with_transform(transform_batch) for dataset in client_group_b_datasets.values()])
-        loader_b = DataLoader(training_b, batch_size=CONFIG["batch_size"], collate_fn=collate_fn)
-        training_metrics["train_acc_b"] = evaluate(global_model, loader_b, CONFIG["device"]) * 100
-        replay_sets = [dataset.with_transform(transform_batch) for dataset in client_replay_buffers.values() if dataset is not None]
-        training_metrics["train_acc_replay"] = None
-        if replay_sets:
-            loader_replay = DataLoader(ConcatDataset(replay_sets), batch_size=CONFIG["batch_size"], collate_fn=collate_fn)
-            training_metrics["train_acc_replay"] = evaluate(global_model, loader_replay, CONFIG["device"]) * 100
-        print(f"[CONTROL] B en entrenamiento: {training_metrics['train_acc_b']:.2f}%; replay: {training_metrics['train_acc_replay']}")
-
-    clear_memory()
-
+def default_config():
     return {
-        "fraction": fraction_label,
-        "step3_acc_a": base_acc_a,
-        "step4_acc_a": acc_a_after_step4,
-        "step4_acc_b": acc_b_after_step4,
-        "loss_a": base_acc_a - acc_a_after_step4,
-        **training_metrics,
+        "num_clients": 10,
+        "batch_size": 32,
+        "local_epochs": 10,
+        "num_rounds": 5,
+        "lr": 0.001,
+        "seed": 42,
+        "dataset_revision": "aadb3af77e9048adbea6b47c21a81e47dd092ae5",
+        "device": "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"),
     }
 
-# ------------------------------------------------------------------
-# 6. STAGE 1 & STAGE 2 EXPERIMENTS (0%, 5%, 10%, 15%, 20%, 25%)
-# ------------------------------------------------------------------
-results_stage_2 = []
-for percent in args.buffers:
-    result = run_phase2_experiment(percent / 100)
-    results_stage_2.append(result)
-    save_audit()
+
+def parse_percent(value):
+    percent = int(value)
+    if not 0 <= percent < 100:
+        raise argparse.ArgumentTypeError("los porcentajes de buffer deben estar entre 0 y 99")
+    return percent
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    profiles = parser.add_mutually_exclusive_group()
+    profiles.add_argument("--quick", action="store_true", help="Prueba funcional reducida; no sirve para comparar precisión")
+    profiles.add_argument("--validation", action="store_true", help="Piloto equilibrado con controles de aprendizaje")
+    parser.add_argument("--output-dir", help="Directorio para nuevos resultados, sin sobrescribir los anteriores")
+    parser.add_argument("--audit", action="store_true", help="Guarda diagnósticos y pesos para verificar_cifar100.py")
+    parser.add_argument("--phase1-checkpoint", type=Path, help="Reutiliza unos pesos de fase A (requiere su manifiesto)")
+    parser.add_argument("--checkpoint-manifest", type=Path, help="Configuración del conjunto A aprendido por el checkpoint")
+    parser.add_argument("--buffers", nargs="+", type=parse_percent, default=[0, 5, 10, 15, 20, 25],
+                        help="Porcentajes de A conservados por cliente; 0 (sin replay) es obligatorio")
+    parser.add_argument("--rounds", type=int, help="Sobrescribe el número de rondas por fase")
+    parser.add_argument("--local-epochs", type=int, help="Sobrescribe las épocas locales")
+    parser.add_argument("--seed", type=int, help="Semilla del experimento (por defecto 42)")
+    parser.add_argument("--controlled-replay", action=argparse.BooleanOptionalAction, default=True,
+                        help="Mismas actualizaciones, semilla reiniciada y buffers anidados (por defecto). "
+                             "--no-controlled-replay recupera el diseño antiguo, en el que más buffer = más pasos")
+    parser.add_argument("--replay-mix", choices=["concat", "balanced"], default="concat",
+                        help="Cómo se mezclan B y el buffer en cada lote")
+    parser.add_argument("--replay-batch-fraction", type=float, default=0.5,
+                        help="Con --replay-mix balanced: fracción de cada lote que sale del buffer")
+    parser.add_argument("--distill-weight", type=float, default=0.0,
+                        help="Peso de la destilación sobre las clases A respecto al modelo de la fase A (0 = sin destilación)")
+    parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True,
+                        help="Normaliza con media/desviación de CIFAR-100")
+    parser.add_argument("--augment", action=argparse.BooleanOptionalAction, default=True,
+                        help="Recorte aleatorio con relleno y volteo horizontal durante el entrenamiento")
+    return parser
+
+
+def resolve_config(args, parser):
+    config = default_config()
+    if 0 not in args.buffers or len(args.buffers) != len(set(args.buffers)):
+        parser.error("--buffers debe incluir 0 y no repetir porcentajes")
+    args.buffers.sort()
+    if args.quick:
+        config.update(num_clients=2, local_epochs=1, num_rounds=1, train_samples_per_group=100, test_samples_per_group=100)
     if args.validation:
-        with open("diagnostic_results.csv", "w", newline="", encoding="utf-8") as diagnostic_file:
-            writer = csv.DictWriter(diagnostic_file, fieldnames=list(results_stage_2[0]))
-            writer.writeheader()
-            writer.writerows(results_stage_2)
-        problem = learning_problem(result["step4_acc_b"], result["train_acc_b"], result["train_acc_replay"], CONFIG)
-        if problem:
-            validation_status["reason"] = f"{problem} con buffer {percent}%; comparación no validada"
-            save_validation_status()
-            raise RuntimeError(validation_status["reason"])
-validation_status.update(comparison_valid=args.validation,
-                         reason="Controles mínimos del piloto superados; no sustituye varias semillas ni el experimento completo" if args.validation else "Prueba funcional sin validación de aprendizaje" if args.quick else "Ejecución completa; revisar aprendizaje y replicar con varias semillas")
-save_validation_status()
-results_stage_1 = [result for result, percent in zip(results_stage_2, args.buffers) if percent <= 20]
-print_table("COMPARISON TABLE (SELECTED BUFFERS)", results_stage_2)
-plot_and_save_chart(results_stage_1, "group_a_accuracy_loss_up_to_20.png", "Group A Accuracy Loss (Selected Buffers up to 20%)")
-with open("results.csv", "w", newline="", encoding="utf-8") as results_file:
-    writer = csv.DictWriter(results_file, fieldnames=list(results_stage_2[0]))
-    writer.writeheader()
-    writer.writerows(results_stage_2)
-print_table("FINAL COMPARISON TABLE (SELECTED REPLAY BUFFERS)", results_stage_2)
-plot_and_save_chart(results_stage_2, "group_a_accuracy_loss_all_buffers.png", "Group A Accuracy Loss Across Selected Buffers")
-if args.audit:
-    save_audit()
-    print("[AUDIT] Diagnósticos guardados en audit.json y pesos en audit_phase*.pt")
+        config.update(num_clients=2, local_epochs=3, num_rounds=3, train_samples_per_group=500,
+                      test_samples_per_group=1000, sampling="balanced", min_base_accuracy_percent=10.0,
+                      min_new_task_accuracy_percent=8.0, min_training_accuracy_percent=50.0,
+                      equal_optimizer_steps=True)
+    for value, key in ((args.rounds, "num_rounds"), (args.local_epochs, "local_epochs")):
+        if value is not None:
+            if value < 1:
+                parser.error("Las rondas y épocas deben ser positivas")
+            config[key] = value
+    if args.seed is not None:
+        config["seed"] = args.seed
+    controlled = args.validation or args.controlled_replay
+    if args.replay_mix == "balanced":
+        if not controlled:
+            parser.error("--replay-mix balanced necesita el presupuesto controlado de actualizaciones")
+        if not 0 < args.replay_batch_fraction < 1:
+            parser.error("--replay-batch-fraction debe estar entre 0 y 1")
+    if args.distill_weight < 0:
+        parser.error("--distill-weight no puede ser negativo")
+    config.update(normalize=args.normalize, augment=args.augment, controlled_replay=controlled,
+                  replay_mix=args.replay_mix,
+                  replay_batch_fraction=args.replay_batch_fraction if args.replay_mix == "balanced" else None,
+                  distill_weight=args.distill_weight)
+
+    contract = None
+    if args.phase1_checkpoint:
+        args.phase1_checkpoint = args.phase1_checkpoint.resolve()
+        if not args.phase1_checkpoint.is_file():
+            parser.error("No existe el checkpoint de fase A")
+        candidates = [args.checkpoint_manifest] if args.checkpoint_manifest else [
+            args.phase1_checkpoint.with_suffix(".config.json"), args.phase1_checkpoint.parent / "config.json"]
+        manifest = next((c for c in candidates if c and c.is_file()), None)
+        if manifest is None:
+            parser.error("El checkpoint necesita su configuración de entrenamiento A (--checkpoint-manifest)")
+        contract = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        try:
+            validate_training_contract(config, contract)
+        except ValueError as error:
+            parser.error(f"{error}. Usa los mismos datos, clientes y preprocesado con los que se entrenó el checkpoint "
+                         "(global_model_phase1.pt requiere --no-normalize --no-augment).")
+        sha = hashlib.sha256(args.phase1_checkpoint.read_bytes()).hexdigest()
+        if contract.get("checkpoint_sha256") and contract["checkpoint_sha256"] != sha:
+            parser.error("El manifiesto no corresponde al SHA-256 de este checkpoint")
+    return config, contract
+
+
+class Experiment:
+    def __init__(self, args, config, contract):
+        self.args, self.config, self.contract = args, config, contract
+        self.device = config["device"]
+        self.audit = {"datasets": [], "training": [], "evaluation": [], "phase2_initial_weights": {}}
+        self.context = {}
+        self.history = []
+        self.status = {"comparison_valid": False,
+                       "profile": "quick" if args.quick else "validation" if args.validation else "full",
+                       "reason": "Prueba funcional sin validación de aprendizaje" if args.quick else "Pendiente de completar"}
+        self.preprocess = fl_core.Preprocess(normalize=config["normalize"])
+
+    # ---------------------------------------------------------- persistencia
+    def save_status(self):
+        Path("validation.json").write_text(json.dumps(self.status, indent=2), encoding="utf-8")
+
+    def save_audit(self):
+        if self.args.audit:
+            Path("audit.json").write_text(json.dumps(self.audit, indent=2), encoding="utf-8")
+
+    # ---------------------------------------------------------- datos
+    def filter_by_classes(self, partition, classes, limit=None):
+        allowed = set(classes)
+        label_col = "fine_label" if "fine_label" in partition.column_names else "label"
+        filtered = partition.filter(lambda example: example[label_col] in allowed)
+        if limit is not None and len(filtered) > limit:
+            if self.config.get("sampling") == "balanced":
+                filtered = balanced_subset(filtered, limit, self.config["seed"])
+            else:
+                filtered = filtered.shuffle(seed=self.config["seed"]).select(range(limit))
+        if self.args.audit:
+            counts = Counter(filtered[label_col])
+            self.audit["datasets"].append({
+                "context": dict(self.context), "group": "A" if min(classes) == 0 else "B",
+                "samples": len(filtered), "classes_present": len(counts), "label_counts": dict(counts)})
+        return fl_core.hf_to_tensors(filtered)
+
+    def load_data(self):
+        from flwr_datasets import FederatedDataset
+
+        cfg = self.config
+        fds = FederatedDataset(dataset=DATASET, revision=cfg["dataset_revision"],
+                               partitioners={"train": cfg["num_clients"]}, seed=cfg["seed"])
+        test = fds.load_split("test")
+        self.test_a = self.filter_by_classes(test, GROUP_A, cfg.get("test_samples_per_group"))
+        self.test_b = self.filter_by_classes(test, GROUP_B, cfg.get("test_samples_per_group"))
+        self.train_a, self.train_b = {}, {}
+        for client in range(cfg["num_clients"]):
+            self.context.update(phase=1, client=client)
+            partition = fds.load_partition(partition_id=client, split="train")
+            self.train_a[client] = self.filter_by_classes(partition, GROUP_A, cfg.get("train_samples_per_group"))
+            self.train_b[client] = self.filter_by_classes(partition, GROUP_B, cfg.get("train_samples_per_group"))
+        manifest = {"clients": [{"client": c, "a_samples": len(self.train_a[c][1]), "b_samples": len(self.train_b[c][1])}
+                                for c in self.train_a],
+                    "total_a_samples": sum(len(y) for _, y in self.train_a.values()),
+                    "preprocess": self.preprocess.describe(), "augment": cfg["augment"]}
+        Path("data_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        self.total_a = manifest["total_a_samples"]
+        print(f"[DATA] El buffer se calcula sobre {self.total_a} imágenes A en total.")
+
+    # ---------------------------------------------------------- entrenamiento
+    def evaluate(self, model, x, y):
+        result = fl_core.evaluate(model, x, y, self.device, self.preprocess, group_a_classes=GROUP_A)
+        if self.args.audit:
+            self.audit["evaluation"].append({"context": dict(self.context), **result})
+        return result
+
+    def local_round(self, global_model, batches_for_client, generator, teacher=None):
+        weights = []
+        for client in range(self.config["num_clients"]):
+            self.context["client"] = client
+            local = fl_core.get_model().to(self.device)
+            local.load_state_dict(global_model.state_dict())
+            record = {} if self.args.audit else None
+            weights.append(fl_core.train_local(
+                local, batches_for_client(client), self.config["lr"], self.device, self.preprocess,
+                augment=self.config["augment"], generator=generator, teacher=teacher,
+                distill_weight=self.config["distill_weight"], old_classes=GROUP_A, record=record))
+            if record is not None:
+                self.audit["training"].append({"context": dict(self.context), **record})
+        global_model.load_state_dict(fl_core.fedavg(weights))
+
+    def phase1(self):
+        cfg, args = self.config, self.args
+        print("\n=== FASE 1: ENTRENAMIENTO EN EL GRUPO A (una vez para todas las variantes) ===")
+        model = fl_core.get_model().to(self.device)
+        if args.phase1_checkpoint:
+            model.load_state_dict(torch.load(args.phase1_checkpoint, map_location=self.device, weights_only=True))
+            print(f"[INFO] Fase A reutilizada de: {args.phase1_checkpoint}")
+        else:
+            generator = torch.Generator().manual_seed(cfg["seed"])
+            for r in range(cfg["num_rounds"]):
+                self.context = {"phase": 1, "round": r + 1}
+
+                def batches(client):
+                    x, y = self.train_a[client]
+                    return fl_core.concat_batches(x, y, None, None, cfg["batch_size"], cfg["local_epochs"], generator=generator)
+
+                self.local_round(model, batches, generator)
+                acc = self.evaluate(model, *self.test_a)["accuracy_percent"]
+                print(f"Fase 1 - Ronda {r + 1}/{cfg['num_rounds']} -> Precisión A: {acc:.2f}%")
+        self.context = {"phase": 1, "final": True}
+        self.base_weights = copy.deepcopy(model.state_dict())
+        self.base_acc_a = self.evaluate(model, *self.test_a)["accuracy_percent"]
+        print(f"[INFO] Precisión A antes de comparar replay: {self.base_acc_a:.2f}%")
+        self.status["base_accuracy_a_percent"] = self.base_acc_a
+        if args.validation and self.base_acc_a < cfg["min_base_accuracy_percent"]:
+            self.status["reason"] = "Aprendizaje insuficiente en A; se cancela la comparación de replay"
+            self.save_status()
+            self.save_audit()
+            raise RuntimeError(self.status["reason"])
+        if not args.phase1_checkpoint and not args.quick:
+            self.save_phase1_checkpoint(model)
+        if args.audit:
+            torch.save(self.base_weights, "audit_phase1.pt")
+            self.audit["phase1_weights_sha256"] = fl_core.weights_digest(model)
+            self.save_audit()
+
+    def save_phase1_checkpoint(self, model):
+        """Guarda los pesos A con su manifiesto, para poder reutilizarlos con trazabilidad."""
+        torch.save(model.state_dict(), "phase1_checkpoint.pt")
+        keys = ("num_clients", "batch_size", "local_epochs", "num_rounds", "lr", "seed", "dataset_revision",
+                "train_samples_per_group", "sampling", "normalize", "augment")
+        manifest = {key: self.config.get(key) for key in keys}
+        manifest.update(group_a_classes=GROUP_A,
+                        checkpoint_sha256=hashlib.sha256(Path("phase1_checkpoint.pt").read_bytes()).hexdigest(),
+                        provenance=f"Generado por cifar100_three_buffer.py el {datetime.now():%Y-%m-%d %H:%M}",
+                        phase1_test_accuracy_percent=self.base_acc_a, torch_version=torch.__version__)
+        Path("phase1_checkpoint.config.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    def build_buffers(self, percent):
+        buffers = {}
+        for client, (x, y) in self.train_a.items():
+            size = len(y) * percent // 100
+            if size == 0:
+                buffers[client] = None
+                continue
+            if self.config["controlled_replay"]:
+                indices = balanced_order(y.tolist(), self.config["seed"] + client)[:size]
+            else:
+                rng = torch.Generator().manual_seed(self.config["seed"] * 1000 + client)
+                indices = torch.randperm(len(y), generator=rng)[:size].tolist()
+            idx = torch.as_tensor(indices)
+            buffers[client] = (x[idx], y[idx])
+        return buffers
+
+    def phase2(self, percent):
+        cfg = self.config
+        if cfg["controlled_replay"]:
+            seed_everything(cfg["seed"])
+        label = "No Replay" if percent == 0 else f"{percent}% Replay"
+        print(f"\n=== FASE 2: buffer = {label} ({cfg['replay_mix']}, destilación {cfg['distill_weight']}) ===")
+        model = fl_core.get_model().to(self.device)
+        model.load_state_dict(copy.deepcopy(self.base_weights))
+        if self.args.audit:
+            self.audit["phase2_initial_weights"][str(percent / 100)] = fl_core.weights_digest(model)
+        teacher = None
+        if cfg["distill_weight"] > 0:
+            teacher = fl_core.get_model().to(self.device)
+            teacher.load_state_dict(self.base_weights)
+            for p in teacher.parameters():
+                p.requires_grad_(False)
+
+        buffers = self.build_buffers(percent)
+        replay_total = sum(len(b[1]) for b in buffers.values() if b is not None)
+        self.audit.setdefault("replay_memory", {})[str(percent)] = {
+            "a_pool_samples": self.total_a, "buffer_samples": replay_total,
+            "actual_fraction": replay_total / self.total_a,
+            "per_client": [{"client": c, "a_samples": len(self.train_a[c][1]),
+                            "buffer_samples": len(b[1]) if b is not None else 0} for c, b in buffers.items()]}
+        print(f"[REPLAY] Memoria real: {replay_total}/{self.total_a} imágenes A.")
+
+        generator = torch.Generator().manual_seed(cfg["seed"] + 1)
+        for r in range(cfg["num_rounds"]):
+            self.context = {"phase": 2, "replay_fraction": percent / 100, "round": r + 1}
+
+            def batches(client):
+                bx, by = self.train_b[client]
+                buf = buffers[client]
+                steps = fl_core.steps_per_epoch(len(by), cfg["batch_size"]) * cfg["local_epochs"] if cfg["controlled_replay"] else None
+                if cfg["replay_mix"] == "balanced" and buf is not None:
+                    return fl_core.mixed_batches(bx, by, buf[0], buf[1], cfg["batch_size"], steps,
+                                                 cfg["replay_batch_fraction"], generator)
+                return fl_core.concat_batches(bx, by, buf[0] if buf else None, buf[1] if buf else None,
+                                              cfg["batch_size"], cfg["local_epochs"], max_steps=steps, generator=generator)
+
+            self.local_round(model, batches, generator, teacher)
+            acc_a = self.evaluate(model, *self.test_a)["accuracy_percent"]
+            acc_b = self.evaluate(model, *self.test_b)["accuracy_percent"]
+            print(f"Fase 2 - Ronda {r + 1}/{cfg['num_rounds']} -> A: {acc_a:.2f}% | B: {acc_b:.2f}%")
+            self.history.append({"replay_percent": percent, "round": r + 1,
+                                 "accuracy_a_percent": acc_a, "accuracy_b_percent": acc_b})
+            with open("history.csv", "w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(self.history[0]))
+                writer.writeheader()
+                writer.writerows(self.history)
+
+        self.context = {"phase": 2, "replay_fraction": percent / 100, "final": True}
+        final_a = self.evaluate(model, *self.test_a)
+        final_b = self.evaluate(model, *self.test_b)
+        if self.args.audit:
+            torch.save(model.state_dict(), f"audit_phase2_{percent}.pt")
+
+        extra = {}
+        if self.args.validation:
+            all_b = (torch.cat([x for x, _ in self.train_b.values()]), torch.cat([y for _, y in self.train_b.values()]))
+            extra["train_acc_b"] = fl_core.evaluate(model, *all_b, self.device, self.preprocess)["accuracy_percent"]
+            extra["train_acc_replay"] = None
+            sets = [b for b in buffers.values() if b is not None]
+            if sets:
+                xs, ys = torch.cat([b[0] for b in sets]), torch.cat([b[1] for b in sets])
+                extra["train_acc_replay"] = fl_core.evaluate(model, xs, ys, self.device, self.preprocess)["accuracy_percent"]
+            print(f"[CONTROL] B en entrenamiento: {extra['train_acc_b']:.2f}%; replay: {extra['train_acc_replay']}")
+        del teacher
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        acc_a, acc_b = final_a["accuracy_percent"], final_b["accuracy_percent"]
+        n_a, n_b = final_a["total"], final_b["total"]
+        return {
+            "fraction": label,
+            "step3_acc_a": self.base_acc_a,
+            "step4_acc_a": acc_a,
+            "step4_acc_b": acc_b,
+            "loss_a": self.base_acc_a - acc_a,
+            # Métricas adicionales: no se quedan en el suelo cuando A = 0 %.
+            "acc_all_100_classes": (final_a["correct"] + final_b["correct"]) * 100 / (n_a + n_b),
+            "retention_a_percent": fl_core.retention_percent(self.base_acc_a, acc_a),
+            "group_aware_acc_a": final_a["group_aware_accuracy_percent"],
+            "pred_share_b_on_test_a": final_a["pred_share_b_percent"],
+            "cross_entropy_a": final_a["mean_cross_entropy"],
+            "buffer_samples": replay_total,
+            **extra,
+        }
+
+    # ---------------------------------------------------------- ejecución
+    def run(self):
+        args, cfg = self.args, self.config
+        self.save_status()
+        self.load_data()
+        self.phase1()
+        results = []
+        for percent in args.buffers:
+            result = self.phase2(percent)
+            results.append(result)
+            self.save_audit()
+            if args.validation:
+                write_csv("diagnostic_results.csv", results)
+                problem = learning_problem(result["step4_acc_b"], result["train_acc_b"], result["train_acc_replay"], cfg)
+                if problem:
+                    self.status["reason"] = f"{problem} con buffer {percent}%; comparación no validada"
+                    self.save_status()
+                    raise RuntimeError(self.status["reason"])
+        self.status.update(
+            comparison_valid=args.validation,
+            reason=("Controles mínimos del piloto superados; no sustituye varias semillas ni el experimento completo"
+                    if args.validation else "Prueba funcional sin validación de aprendizaje" if args.quick
+                    else "Ejecución completa; revisar aprendizaje y replicar con varias semillas"))
+        self.save_status()
+        write_csv("results.csv", results)
+        print_table(results)
+        if args.quick:
+            print("[INFO] Prueba funcional: se omiten los gráficos comparativos porque no validan aprendizaje.")
+        else:
+            rows = [{"fraction": r["fraction"], "loss_a_pp": r["loss_a"]} for r in results]
+            plot_loss([row for row, p in zip(rows, args.buffers) if p <= 20], "group_a_accuracy_loss_up_to_20.png",
+                      "Pérdida de precisión en A (buffers hasta 20 %)", xlabel="Método")
+            plot_loss(rows, "group_a_accuracy_loss_all_buffers.png", "Pérdida de precisión en A", xlabel="Método")
+        if args.audit:
+            self.save_audit()
+            print("[AUDIT] Diagnósticos guardados en audit.json y pesos en audit_phase*.pt")
+        return results
+
+
+def write_csv(path, rows):
+    fields = list(dict.fromkeys(key for row in rows for key in row))
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def print_table(results):
+    width = 118
+    print("\n" + "=" * width)
+    print(f"{'Método':<14} | {'A antes':>8} | {'A después':>9} | {'B después':>9} | {'Pérdida A':>10} | "
+          f"{'Retención':>9} | {'A (grupo)':>9} | {'Pred. B en A':>12} | {'100 clases':>10}")
+    print("-" * width)
+    for r in results:
+        retention = "—" if r["retention_a_percent"] is None else f"{r['retention_a_percent']:.1f}%"
+        print(f"{r['fraction']:<14} | {r['step3_acc_a']:>7.2f}% | {r['step4_acc_a']:>8.2f}% | {r['step4_acc_b']:>8.2f}% | "
+              f"{r['loss_a']:>7.2f} pp | {retention:>9} | {r['group_aware_acc_a']:>8.2f}% | "
+              f"{r['pred_share_b_on_test_a']:>11.1f}% | {r['acc_all_100_classes']:>9.2f}%")
+    print("=" * width)
+    print("Pérdida A = A antes − A después (pp). «A (grupo)» restringe la predicción a las clases A (diagnóstico).")
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    config, contract = resolve_config(args, parser)
+    if not args.output_dir:
+        args.output_dir = os.path.join("resultados", f"cifar100_three_buffer_seed{config['seed']}_{datetime.now():%Y-%m-%d_%H%M%S}")
+    os.makedirs(args.output_dir, exist_ok=True)
+    os.chdir(args.output_dir)
+    print(f"[INFO] Resultados en: {os.getcwd()}")
+    if args.quick:
+        print("QUICK TEST: muestras reducidas; las precisiones no son resultados del experimento completo.")
+    if args.validation:
+        print("VALIDATION: piloto con aprendizaje mínimo, clases cubiertas y entrenamiento controlado.")
+    Path("config.json").write_text(json.dumps({
+        **config, "quick": args.quick, "validation": args.validation, "audit": args.audit, "buffers": args.buffers,
+        "phase1_training_contract": contract, "torch_version": torch.__version__, "cpu_threads": torch.get_num_threads(),
+        "phase1_checkpoint": str(args.phase1_checkpoint) if args.phase1_checkpoint else None,
+        "phase1_checkpoint_sha256": hashlib.sha256(args.phase1_checkpoint.read_bytes()).hexdigest() if args.phase1_checkpoint else None,
+    }, indent=2), encoding="utf-8")
+    seed_everything(config["seed"])
+    print(f"Device in use: {config['device']}")
+    return Experiment(args, config, contract).run()
+
+
+if __name__ == "__main__":
+    main()

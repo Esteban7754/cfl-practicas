@@ -35,9 +35,10 @@ def build_parser(description, default_buffers=None):
                         help="Porcentajes de replay a comparar; 0 = sin replay (siempre se mide, nunca se fija a mano)")
     parser.add_argument("--rounds", type=int, help="Sobrescribe el número de rondas por fase")
     parser.add_argument("--local-epochs", type=int, help="Sobrescribe las épocas locales")
-    parser.add_argument("--equal-steps", action="store_true",
-                        help="Mismo número de actualizaciones en todas las variantes: el replay sustituye parte de los lotes de B "
-                             "en lugar de añadir pasos extra")
+    parser.add_argument("--equal-steps", action=argparse.BooleanOptionalAction, default=True,
+                        help="Mismo número de actualizaciones en todas las variantes (por defecto): el replay sustituye parte "
+                             "de los lotes de B en lugar de añadir pasos. --no-equal-steps recupera el diseño antiguo, en el "
+                             "que más buffer también implica más entrenamiento")
     parser.add_argument("--output-dir", help="Carpeta para resultados (CSV, config y gráficos)")
     return parser
 

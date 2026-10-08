@@ -4,12 +4,11 @@ import copy
 import glob
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset, ConcatDataset, Subset
-from torchvision.models import resnet18
 import torchvision.transforms as transforms
 from PIL import Image
 import numpy as np
+import fl_core
 from reproducibility import seed_everything
 from experiment_common import (build_parser, apply_args, nested_buffer_indices, step_budget,
                                make_result, print_table, save_results_csv, plot_loss)
@@ -97,46 +96,15 @@ transform = transforms.Compose([
 ])
 
 def get_model():
-    """
-    Returns a ResNet-18 adapted for 64x64 images and 15 MVTec AD classes.
-    """
-    model = resnet18(num_classes=CONFIG["num_classes"])
-    model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-    model.maxpool = nn.Identity()
-    return model
+    """ResNet-18 de fl_core adaptada a imágenes pequeñas, con CONFIG["num_classes"] salidas."""
+    return fl_core.get_model(CONFIG["num_classes"])
 
 def train_local(model, train_loader, epochs, lr, device, max_steps=None):
-    model.train()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
-
-    steps = 0
-    for _ in range(epochs):
-        for imgs, labels in train_loader:
-            imgs, labels = imgs.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(imgs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            steps += 1
-            if max_steps is not None and steps >= max_steps:
-                return model.state_dict()
-
-    return model.state_dict()
+    """Entrenamiento local común (fl_core) sobre un DataLoader."""
+    return fl_core.train_local(model, fl_core.loader_batches(train_loader, epochs, max_steps), lr, device)
 
 def evaluate(model, test_loader, device):
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for imgs, labels in test_loader:
-            imgs, labels = imgs.to(device), labels.to(device)
-            outputs = model(imgs)
-            _, predicted = torch.max(outputs, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-    return correct / total if total > 0 else 0.0
+    return fl_core.accuracy_on_loader(model, test_loader, device)
 
 def clear_memory():
     gc.collect()
@@ -242,14 +210,7 @@ for r in range(CONFIG["num_rounds"]):
         w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"])
         local_weights.append(w)
 
-    # FedAvg
-    avg_weights = {}
-    for key in local_weights[0].keys():
-        target_dtype = local_weights[0][key].dtype
-        stacked_weights = torch.stack([w[key].to(torch.float32) for w in local_weights], dim=0)
-        avg_weights[key] = stacked_weights.mean(dim=0).to(target_dtype)
-
-    global_model.load_state_dict(avg_weights)
+    global_model.load_state_dict(fl_core.fedavg(local_weights))
     acc_a = evaluate(global_model, test_loader_a, CONFIG["device"])
     print(f"Phase 1 - Round {r+1}/{CONFIG['num_rounds']} -> Group A Accuracy: {acc_a * 100:.2f}%")
 
@@ -297,13 +258,7 @@ def run_continual_experiment(replay_percent):
             w = train_local(local_model, train_loader, CONFIG["local_epochs"], CONFIG["lr"], CONFIG["device"], max_steps=max_steps)
             local_weights.append(w)
 
-        # FedAvg
-        avg_weights = {}
-        for key in local_weights[0].keys():
-            target_dtype = local_weights[0][key].dtype
-            stacked_weights = torch.stack([w[key].to(torch.float32) for w in local_weights], dim=0)
-            avg_weights[key] = stacked_weights.mean(dim=0).to(target_dtype)
-        global_model.load_state_dict(avg_weights)
+        global_model.load_state_dict(fl_core.fedavg(local_weights))
 
         acc_a_curr = evaluate(global_model, test_loader_a, CONFIG["device"]) * 100
         acc_b_curr = evaluate(global_model, test_loader_b, CONFIG["device"]) * 100
