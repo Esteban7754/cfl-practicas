@@ -30,15 +30,16 @@
 - Nuevas variantes: `--replay-mix balanced` (proporción fija del buffer en cada lote) y `--distill-weight` (destilación sobre las clases A, estilo LwF).
 - Nuevas métricas en `results.csv`: precisión en las 100 clases, retención (A después / A antes), precisión de A restringida a su grupo, proporción de predicciones B sobre el test A y entropía cruzada de A.
 - Cada ejecución que entrena la fase A guarda `phase1_checkpoint.pt` junto a un manifiesto, para poder reutilizarla con trazabilidad.
+- Imagen Docker reproducible con dependencias fijadas, CIFAR-100 incluido (funciona sin red) y el código dentro; cada `config.json` registra la revisión del código y una huella de los paquetes. Interfaz única: `.\run.ps1 info | tests | rapido | comparar | semillas`.
 
 Las ejecuciones anteriores al 8 de octubre se hicieron **sin** normalización ni aumento: sus números no son directamente comparables con las nuevas.
 
 ## Próximos experimentos, en orden
 
-1. **Base fiable.** `.\comparar_replay.ps1 -Buffers 0,20` con 5 épocas locales. Antes de comparar buffers, comprobar que A supera ≈ 60–65 %.
-2. **Barrido con varias semillas.** `.\comparar_replay.ps1 -Seeds 42,43,44 -Buffers 0,5,10,20`.
-3. **Lotes equilibrados.** Lo mismo con `-ReplayMix balanced`.
-4. **Destilación.** `-ReplayMix balanced -DistillWeight 1`, y su combinación con los buffers.
+1. **Base fiable.** `.\run.ps1 comparar` (0 % frente a 20 %, 5 épocas locales). Antes de comparar buffers, comprobar que A supera ≈ 60–65 %.
+2. **Barrido con varias semillas.** `.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20`.
+3. **Lotes equilibrados.** Lo mismo con `--replay-mix balanced`.
+4. **Destilación.** `--replay-mix balanced --distill-weight 1`, y su combinación con los buffers.
 5. Interpretar con la retención y la precisión por grupo además de la pérdida, y con media ± desviación típica (`agregar_semillas.py`).
 
 Ninguno de estos experimentos se ha ejecutado todavía con el código nuevo. Los resultados no están garantizados: no se ha introducido ninguna condición que fuerce una curva concreta.

@@ -1,10 +1,13 @@
-# El contenedor monta la carpeta del proyecto; la imagen solo necesita requirements.lock.
+# Lo que NO entra en la imagen. El código sí entra (COPY . /app); los resultados,
+# datos locales y pesos se montan como volúmenes al ejecutar.
 .git
+.github
+.vscode
 .backup
 .venv
 .runtime
 .setup
-__pycache__
+**/__pycache__
 data
 resultados
 *.pt

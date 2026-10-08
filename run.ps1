@@ -1,90 +1,127 @@
 ﻿<#
 .SYNOPSIS
-    Ejecuta los experimentos del proyecto dentro del contenedor Docker oficial.
+    Lanzador único del proyecto: construye la imagen Docker si hace falta y ejecuta en ella.
 .DESCRIPTION
-    Sin argumentos abre un menú interactivo. Con argumentos, el primero es el script
-    (o "test" / "unittest") y el resto se pasa tal cual al script de Python.
-    Monta siempre la carpeta del proyecto, aunque se lance desde otra carpeta.
-.EXAMPLE
-    .\run.ps1
-    .\run.ps1 test
-    .\run.ps1 unittest
-    .\run.ps1 cifar100_three_buffer.py --quick --output-dir resultados/prueba
-    .\run.ps1 legacy/step_four.py
+    .\run.ps1                         menú interactivo
+    .\run.ps1 construir               (re)construye la imagen con la versión actual del código
+    .\run.ps1 info                    entorno, datos, GPU y versión de la imagen
+    .\run.ps1 tests                   tests unitarios
+    .\run.ps1 rapido                  prueba funcional con CIFAR-100 real + verificación
+    .\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20 [--replay-mix balanced] [--distill-weight 1]
+    .\run.ps1 semillas domainnet.py --seeds 42 43 44 --buffers 0 10 20
+    .\run.ps1 python cifar100_three_buffer.py --quick      cualquier comando dentro del contenedor
+
+    Opciones del lanzador (antes del comando):
+      -dev   usa tu copia del código (montada) en vez de la congelada en la imagen
+      -gpu   usa la imagen con GPU NVIDIA (constrúyela con: .\run.ps1 -gpu construir)
+      -cpu   fuerza la imagen de CPU aunque haya una GPU
 #>
-param (
-    [Parameter(Position = 0)][string]$Script = "",
-    [Parameter(ValueFromRemainingArguments = $true)][string[]]$ScriptArgs = @()
-)
 
-$projectRoot = $PSScriptRoot
+$ErrorActionPreference = "Stop"
+$root = $PSScriptRoot
+$compose = @("compose", "-f", (Join-Path $root "docker-compose.yml"), "--project-directory", $root)
 
-function Show-Menu {
-    Clear-Host
-    Write-Host "==============================================================================" -ForegroundColor Cyan
-    Write-Host "          APRENDIZAJE FEDERADO CONTINUO - MENU DE EJECUCION                   " -ForegroundColor Cyan
-    Write-Host "==============================================================================" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  [1] Verificación rápida del entorno (verificar_entorno.py)" -ForegroundColor Green
-    Write-Host "  [2] Tests unitarios (python -m unittest)" -ForegroundColor Green
-    Write-Host "  [3] CIFAR-100: comparativa de replay (cifar100_three_buffer.py)"
-    Write-Host "  [4] CIFAR-100: prueba funcional rápida (cifar100_three_buffer.py --quick)"
-    Write-Host "  [5] DomainNet: cambio de dominio a bocetos (domainnet.py)"
-    Write-Host "  [6] MVTec AD: clasificación de categorías (mvtecad_all_experiments.py)"
-    Write-Host "  [7] Scripts históricos (carpeta legacy/)"
-    Write-Host "  [9] Consola interactiva en el contenedor" -ForegroundColor Yellow
-    Write-Host "  [0] Salir"
-    Write-Host ""
-    $opt = Read-Host "Introduce una opción"
-    switch ($opt) {
-        "1" { return @("verificar_entorno.py") }
-        "2" { return @("-m", "unittest", "-v") }
-        "3" { return @("cifar100_three_buffer.py") }
-        "4" { return @("cifar100_three_buffer.py", "--quick") }
-        "5" { return @("domainnet.py") }
-        "6" { return @("mvtecad_all_experiments.py") }
-        "7" {
-            Write-Host "  [a] legacy/step_four.py   [b] legacy/step_six_v1.py   [c] legacy/three_buffer_size.py   [d] legacy/three_buffer_v2.py"
-            switch (Read-Host "Script histórico") {
-                "a" { return @("legacy/step_four.py") }
-                "b" { return @("legacy/step_six_v1.py") }
-                "c" { return @("legacy/three_buffer_size.py") }
-                "d" { return @("legacy/three_buffer_v2.py") }
-                default { return Show-Menu }
-            }
-        }
-        "9" { return @("interactive") }
-        "0" { exit 0 }
-        default { Write-Host "Opción inválida." -ForegroundColor Red; Start-Sleep -Seconds 1; return Show-Menu }
-    }
+# ------------------------------------------------------------ opciones del lanzador
+$mode = "cfl"; $variant = "auto"; $rest = @()
+foreach ($arg in $args) {
+    if ($rest.Count -eq 0 -and $arg -eq "-dev") { $mode = "dev"; continue }
+    if ($rest.Count -eq 0 -and $arg -eq "-gpu") { $variant = "gpu"; continue }
+    if ($rest.Count -eq 0 -and $arg -eq "-cpu") { $variant = "cpu"; continue }
+    $rest += [string]$arg
 }
 
-docker info > $null 2>&1
+docker info *> $null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Docker Desktop no está en ejecución. Ábrelo y reintenta." -ForegroundColor Red
+    Write-Host "[ERROR] Docker Desktop no está en ejecución. Ábrelo, espera a que arranque y reintenta." -ForegroundColor Red
     exit 1
 }
 
-if ([string]::IsNullOrWhiteSpace($Script)) {
-    $command = Show-Menu
-} elseif ($Script -eq "test") {
-    $command = @("verificar_entorno.py") + $ScriptArgs
-} elseif ($Script -eq "unittest") {
-    $command = @("-m", "unittest", "-v") + $ScriptArgs
-} else {
-    $command = @($Script) + $ScriptArgs
+function Get-Revision {
+    try {
+        $rev = (git -C $root rev-parse --short HEAD 2>$null)
+        if (-not $rev) { return "desconocida" }
+        if (git -C $root status --porcelain --untracked-files=no 2>$null) { $rev += "-modificado" }
+        return $rev
+    } catch { return "desconocida" }
 }
 
-$options = @("--rm", "-v", "${projectRoot}:/workspace", "-v", "cfl-hf-cache:/cache/huggingface", "-w", "/workspace")
-foreach ($name in "OMP_NUM_THREADS", "MKL_NUM_THREADS") {
-    if (Test-Path "env:$name") { $options += @("-e", "$name") }
+function Test-Image([string]$tag) {
+    docker image inspect $tag *> $null
+    return ($LASTEXITCODE -eq 0)
 }
-if (-not [System.Console]::IsInputRedirected) { $options += "-it" }
 
-if ($command[0] -eq "interactive") {
-    docker run @options cfl-practicas bash
-} else {
-    Write-Host "Ejecutando: python $($command -join ' ')" -ForegroundColor Green
-    docker run @options cfl-practicas python @command
+function Test-NvidiaGpu {
+    try { nvidia-smi -L *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
+
+function Build-Image([string]$which) {
+    $env:CFL_REVISION = Get-Revision
+    $env:BUILD_DATE = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+    Write-Host "Construyendo cfl-practicas:$which (código $($env:CFL_REVISION)). La primera vez tarda unos minutos;" -ForegroundColor Cyan
+    Write-Host "después solo se reconstruye lo que cambia." -ForegroundColor Cyan
+    $service = if ($which -eq "gpu") { "gpu" } else { "cfl" }
+    $profileArgs = if ($which -eq "gpu") { @("--profile", "gpu") } else { @() }
+    docker @compose @profileArgs build $service
+    if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] Falló la construcción de la imagen." -ForegroundColor Red; exit $LASTEXITCODE }
+}
+
+# ------------------------------------------------------------ CPU o GPU
+if ($variant -eq "auto") {
+    $variant = "cpu"
+    if (Test-NvidiaGpu) {
+        if (Test-Image "cfl-practicas:gpu") { $variant = "gpu" }
+        else { Write-Host "[INFO] GPU NVIDIA detectada. Para usarla: .\run.ps1 -gpu construir" -ForegroundColor Yellow }
+    }
+}
+$tag = "cfl-practicas:$variant"
+
+# ------------------------------------------------------------ menú
+if ($rest.Count -eq 0) {
+    Write-Host "=============================================================================" -ForegroundColor Cyan
+    Write-Host "  APRENDIZAJE FEDERADO CONTINUO ($tag)" -ForegroundColor Cyan
+    Write-Host "=============================================================================" -ForegroundColor Cyan
+    Write-Host "  [1] Información del entorno          [2] Tests unitarios"
+    Write-Host "  [3] Prueba rápida con CIFAR-100      [4] Comparación 0 % / 20 % (5 épocas)"
+    Write-Host "  [5] Comparación 3 semillas, buffers 0/5/10/20"
+    Write-Host "  [6] Igual con lotes equilibrados     [7] Igual con lotes equilibrados + destilación"
+    Write-Host "  [8] Reconstruir la imagen            [9] Consola dentro del contenedor"
+    Write-Host "  [0] Salir"
+    switch (Read-Host "Opción") {
+        "1" { $rest = @("info") }
+        "2" { $rest = @("tests") }
+        "3" { $rest = @("rapido") }
+        "4" { $rest = @("comparar") }
+        "5" { $rest = @("comparar", "--seeds", "42", "43", "44", "--buffers", "0", "5", "10", "20") }
+        "6" { $rest = @("comparar", "--seeds", "42", "43", "44", "--buffers", "0", "5", "10", "20", "--replay-mix", "balanced") }
+        "7" { $rest = @("comparar", "--seeds", "42", "43", "44", "--buffers", "0", "5", "10", "20", "--replay-mix", "balanced", "--distill-weight", "1") }
+        "8" { $rest = @("construir") }
+        "9" { $rest = @("bash") }
+        default { exit 0 }
+    }
+}
+
+if ($rest[0] -eq "construir") { Build-Image $variant; exit 0 }
+if (-not (Test-Image $tag)) {
+    if ($variant -eq "gpu") { Write-Host "[ERROR] Falta la imagen GPU: .\run.ps1 -gpu construir" -ForegroundColor Red; exit 1 }
+    Build-Image $variant
+}
+
+# Con el código congelado en la imagen, avisa si la imagen es de otra versión del código.
+if ($mode -eq "cfl") {
+    $built = docker image inspect $tag --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' 2>$null
+    $current = Get-Revision
+    if ($built -and $current -ne "desconocida" -and $built -ne $current) {
+        Write-Host "[AVISO] La imagen tiene el código $built y tu carpeta está en $current." -ForegroundColor Yellow
+        Write-Host "        Ejecuta '.\run.ps1 construir' para usar el código actual, o '-dev' para probar sin reconstruir." -ForegroundColor Yellow
+    }
+}
+
+$service = if ($variant -eq "gpu") { "gpu" } elseif ($mode -eq "dev") { "dev" } else { "cfl" }
+if ($variant -eq "gpu" -and $mode -eq "dev") { Write-Host "[INFO] -dev no está disponible con GPU; se usa el código de la imagen." -ForegroundColor Yellow }
+$profileArgs = if ($variant -eq "gpu") { @("--profile", "gpu") } else { @() }
+$runArgs = @("run", "--rm")
+if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { $runArgs += "-T" }
+New-Item -ItemType Directory -Force -Path (Join-Path $root "resultados") | Out-Null
+
+docker @compose @profileArgs @runArgs $service @rest
 exit $LASTEXITCODE

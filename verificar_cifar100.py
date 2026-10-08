@@ -1,8 +1,15 @@
 """Audita los checkpoints con un evaluador y un control de aprendizaje independientes."""
 
-import argparse
-import hashlib
-import json
+import os
+
+# Con CIFAR-100 dentro de la imagen Docker se usa la copia local, sin Internet.
+if os.environ.get("CFL_DATA_PRELOADED") == "1":
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
+import argparse  # noqa: E402
+import hashlib  # noqa: E402
+import json  # noqa: E402
 from collections import Counter
 from pathlib import Path
 

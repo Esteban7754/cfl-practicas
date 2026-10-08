@@ -1,37 +1,56 @@
-# docker compose run --rm cfl python cifar100_three_buffer.py --quick
-# docker compose run --rm cfl python -m unittest -v
-# GPU (opcional): docker compose --profile gpu run --rm cfl-gpu python ...
+# Tres formas de ejecutar la misma imagen (los lanzadores run.ps1 / run.bat las usan):
+#
+#   docker compose run --rm cfl comparar --seeds 42 43 44     # código congelado en la imagen
+#   docker compose run --rm dev tests                         # tu copia del código, para desarrollar
+#   docker compose --profile gpu run --rm gpu comparar        # GPU NVIDIA (opcional)
+#
+# Los resultados quedan siempre en ./resultados. CIFAR-100 viene dentro de la imagen y se
+# copia al volumen cfl-datos la primera vez; DomainNet se descarga ahí y se conserva.
+
+x-base: &base
+  image: cfl-practicas:cpu
+  build:
+    context: .
+    args:
+      TORCH_VARIANT: cpu
+      CFL_REVISION: ${CFL_REVISION:-desconocida}
+      BUILD_DATE: ${BUILD_DATE:-desconocida}
+  environment:
+    - TZ=${TZ:-Europe/Madrid}
+    - OMP_NUM_THREADS
+    - MKL_NUM_THREADS
+    - HF_HUB_OFFLINE
+    - HF_DATASETS_OFFLINE
+  init: true
+
 services:
   cfl:
-    image: cfl-practicas
-    build: .
+    <<: *base
     volumes:
-      - .:/workspace
-      - cfl-hf-cache:/cache/huggingface
-    working_dir: /workspace
-    environment:
-      - PYTHONUNBUFFERED=1
-      - MPLBACKEND=Agg
-      - PYTHONPATH=/workspace
-      - OMP_NUM_THREADS
-      - MKL_NUM_THREADS
-    stdin_open: true
-    tty: true
+      - ./resultados:/app/resultados
+      - ./data:/app/data:ro
+      - cfl-datos:/opt/hf-cache
 
-  cfl-gpu:
+  dev:
+    <<: *base
+    volumes:
+      - .:/app
+      - cfl-datos:/opt/hf-cache
+
+  gpu:
+    <<: *base
     profiles: ["gpu"]
-    image: cfl-practicas-gpu
+    image: cfl-practicas:gpu
     build:
       context: .
-      dockerfile: Dockerfile.gpu
+      args:
+        TORCH_VARIANT: cuda
+        CFL_REVISION: ${CFL_REVISION:-desconocida}
+        BUILD_DATE: ${BUILD_DATE:-desconocida}
     volumes:
-      - .:/workspace
-      - cfl-hf-cache:/cache/huggingface
-    working_dir: /workspace
-    environment:
-      - PYTHONUNBUFFERED=1
-      - MPLBACKEND=Agg
-      - PYTHONPATH=/workspace
+      - ./resultados:/app/resultados
+      - ./data:/app/data:ro
+      - cfl-datos:/opt/hf-cache
     deploy:
       resources:
         reservations:
@@ -40,8 +59,6 @@ services:
               count: all
               capabilities: [gpu]
 
-# Docker Compose crea el volumen la primera vez (ya no hace falta «docker volume create»).
-# Se fija el nombre para compartir la caché con run.bat / run.ps1.
 volumes:
-  cfl-hf-cache:
-    name: cfl-hf-cache
+  cfl-datos:
+    name: cfl-datos

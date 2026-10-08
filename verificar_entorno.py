@@ -10,6 +10,11 @@ import sys
 import os
 import time
 
+# Con CIFAR-100 dentro de la imagen Docker se usa la copia local, sin Internet.
+if os.environ.get("CFL_DATA_PRELOADED") == "1":
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
 print("=" * 60)
 print(" VERIFICACION DEL ENTORNO DE APRENDIZAJE FEDERADO CONTINUO ")
 print("=" * 60)

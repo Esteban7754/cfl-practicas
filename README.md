@@ -26,40 +26,86 @@ La pérdida de precisión es `precisión de A antes de B − precisión de A des
 | `cifar100_sampling.py`, `cifar100_validation.py` | Muestreo equilibrado y controles de aprendizaje. |
 | `verificar_cifar100.py` | Recalcula las métricas desde los checkpoints con un evaluador independiente. |
 | `agregar_semillas.py` | Media ± desviación típica entre semillas. |
-| `comparar_replay.ps1`, `repetir_semillas.ps1` | Lanzadores de comparaciones completas y de varias semillas. |
+| `cfl.py`, `run.ps1`, `run.bat` | Interfaz única (`cfl.py`, dentro del contenedor) y lanzadores de Windows que construyen y ejecutan la imagen. |
+| `Dockerfile`, `docker-compose.yml`, `docker/` | Imagen reproducible (dependencias, datos y código) y su punto de entrada. |
 | `legacy/` | Scripts históricos (`step_four.py`, `step_six_v1.py`, `three_buffer_size.py`, `three_buffer_v2.py`), conservados para reproducir los resultados antiguos. |
 | `resultados/` | Una carpeta por ejecución; `resultados/historicos/` guarda los gráficos y registros antiguos. |
 | `test_*.py` | Tests unitarios y una prueba de extremo a extremo con datos sintéticos (sin Internet). |
 
 Los scripts de experimento solo entrenan al ejecutarse (`python script.py`); `cifar100_three_buffer.py` puede importarse sin efectos.
 
-## Instalación
+## Inicio rápido (Docker)
 
-Se necesita **Docker Desktop** abierto. El Python nativo de Windows de este equipo no puede cargar `torch.dll` (WinError 4551, bloqueado por Control de aplicaciones), así que todo se ejecuta en el contenedor.
-
-```powershell
-docker build -t cfl-practicas .
-```
-
-El volumen de caché de Hugging Face (`cfl-hf-cache`) se crea solo la primera vez. Hay una variante opcional con GPU NVIDIA (`Dockerfile.gpu`, servicio `cfl-gpu` de Docker Compose) que todavía no se ha probado en este equipo.
-
-> **Tras actualizar el repositorio, reconstruye la imagen** (`docker build -t cfl-practicas .`): ahora define `PYTHONPATH=/workspace`, necesario para los scripts de `legacy/`.
-
-## Ejecución
-
-- **Explorador o CMD:** doble clic en `run.bat` (o `ejecutar.bat`) para el menú, o `run.bat <script> [argumentos]`.
-- **PowerShell:** `.\run.ps1` para el menú, o `.\run.ps1 <script> [argumentos]`. Ahora también admite argumentos y funciona desde cualquier carpeta.
-- **VS Code / Cursor:** `Ctrl + Shift + B` ejecuta el archivo abierto en Docker; la tarea de test lanza los tests unitarios.
-- **Docker Compose:** `docker compose run --rm cfl python cifar100_three_buffer.py --quick`.
+Solo hace falta **Docker Desktop** abierto. Todo lo demás (Python, PyTorch, dependencias fijadas, CIFAR-100 y el propio código) va dentro de una imagen, así que la ejecución es idéntica en cualquier equipo y no necesita Internet una vez construida.
 
 ```powershell
-.\run.ps1 test                                   # verificación rápida del entorno (verificar_entorno.py)
-.\run.ps1 unittest                               # tests unitarios
-.\run.ps1 cifar100_three_buffer.py --quick --output-dir resultados/prueba
-.\run.ps1 legacy/step_four.py                    # script histórico
+.\run.ps1                 # menú interactivo (o doble clic en run.bat)
+.\run.ps1 info            # versión de la imagen, datos, hilos y GPU
+.\run.ps1 tests           # tests unitarios dentro del contenedor
+.\run.ps1 rapido          # prueba funcional con CIFAR-100 real + verificación
+.\run.ps1 comparar        # comparación 0 % / 20 %, 5 épocas locales, verificada desde los pesos
 ```
 
-Cada ejecución crea su propia carpeta en `resultados/` (o la indicada con `--output-dir`) con `config.json`, `results.csv`, `history.csv` y los gráficos; nunca sobrescribe los resultados anteriores.
+La primera vez, el lanzador construye la imagen automáticamente: descarga las dependencias y CIFAR-100 y tarda unos minutos. Después solo se reconstruye lo que cambia.
+
+### Comandos
+
+| Comando | Qué hace |
+| --- | --- |
+| `info` | Muestra la revisión del código de la imagen, versiones, hilos, GPU y datos disponibles. |
+| `tests` | Tests unitarios. |
+| `rapido` | `cifar100_three_buffer.py --quick --audit` y verificación independiente. Comprueba el flujo, no el aprendizaje. |
+| `comparar [opciones]` | Comparación de replay con todos los datos, verificada desde los pesos; con varias semillas añade el resumen media ± desviación. Opciones: `--seeds 42 43 44`, `--buffers 0 5 10 20`, `--local-epochs 5`, `--rounds 5`, `--replay-mix balanced`, `--replay-batch-fraction 0.5`, `--distill-weight 1`, `--reuse-checkpoint`, `--threads N`, `--output-dir`, `--dry-run`. |
+| `semillas SCRIPT [opciones]` | Repite `cifar100_three_buffer.py`, `domainnet.py`, `mvtecad_all_experiments.py` o `legacy/three_buffer_v2.py` con `--seeds` y resume. El resto de argumentos se pasa al script. |
+| `construir` | Reconstruye la imagen con el código actual. |
+| `python ...`, `bash` | Cualquier comando dentro del contenedor. |
+
+Ejemplos:
+
+```powershell
+.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20
+.\run.ps1 comparar --seeds 42 43 44 --buffers 0 20 --replay-mix balanced --distill-weight 1
+.\run.ps1 semillas domainnet.py --seeds 42 43 44 --buffers 0 10 20
+.\run.ps1 python cifar100_three_buffer.py --validation --audit --buffers 0 20
+```
+
+Los resultados aparecen siempre en una carpeta nueva dentro de `resultados/`.
+
+### Código congelado o modo desarrollo
+
+Por defecto se ejecuta el código **que está dentro de la imagen**: cada ejecución queda ligada a una versión exacta. `config.json` registra la revisión de git, la fecha de construcción, las versiones y una huella (SHA-256) de todos los paquetes instalados. Si cambias el código, el lanzador te avisa de que la imagen es de otra versión; `.\run.ps1 construir` la actualiza.
+
+Para probar cambios sin reconstruir, añade `-dev` delante del comando: monta tu carpeta sobre el código de la imagen.
+
+```powershell
+.\run.ps1 -dev tests
+.\run.ps1 -dev comparar --reuse-checkpoint --local-epochs 1      # necesita global_model_phase1.pt de tu carpeta
+```
+
+### GPU NVIDIA (opcional)
+
+Si `run.ps1` detecta una GPU NVIDIA te lo indica. Para usarla, construye la variante GPU una vez; a partir de ahí se usa automáticamente (`-cpu` fuerza la de CPU):
+
+```powershell
+.\run.ps1 -gpu construir
+.\run.ps1 info            # debe mostrar "cuda_available": true y el nombre de la GPU
+```
+
+Requiere el controlador NVIDIA actualizado y Docker Desktop con WSL 2; no se ha podido probar en este equipo. En GPU los resultados pueden diferir en los últimos decimales de los de CPU, por eso la verificación exacta desde los pesos solo se hace para ejecuciones en CPU.
+
+### Sin el lanzador
+
+```powershell
+docker compose build cfl
+docker compose run --rm cfl comparar --seeds 42 43
+docker compose run --rm dev tests                     # modo desarrollo
+docker compose --profile gpu run --rm gpu info        # GPU
+```
+
+Opciones de construcción (`--build-arg`): `TORCH_VARIANT=cpu|cuda|system` (`system` usa el PyTorch de la imagen base, por ejemplo `BASE_IMAGE=nvcr.io/nvidia/pytorch:...`) y `PRELOAD_DATA=0`, que no incluye CIFAR-100 y lo descarga en el volumen `cfl-datos` la primera vez.
+
+El Python nativo de Windows de este equipo no puede cargar `torch.dll` (WinError 4551, bloqueado por Control de aplicaciones): usa siempre Docker.
+
 
 ### Opciones de `cifar100_three_buffer.py`
 
@@ -84,21 +130,22 @@ DomainNet y MVTec aceptan `--seed`, `--buffers`, `--rounds`, `--local-epochs`, `
 ### Comparación completa verificada
 
 ```powershell
-$env:OMP_NUM_THREADS = '4'; $env:MKL_NUM_THREADS = '4'
-.\comparar_replay.ps1                                              # 0 % frente a 20 %, 5 épocas locales
-.\comparar_replay.ps1 -Seeds 42,43,44 -Buffers 0,5,10,20            # varias semillas, con resumen
-.\comparar_replay.ps1 -Seeds 42,43,44 -Buffers 0,20 -ReplayMix balanced -DistillWeight 1
-.\comparar_replay.ps1 -ReuseCheckpoint -LocalEpochs 1               # repite el régimen antiguo
+.\run.ps1 comparar                                                   # 0 % frente a 20 %, 5 épocas locales
+.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20              # varias semillas, con resumen
+.\run.ps1 comparar --seeds 42 43 44 --buffers 0 20 --replay-mix balanced --distill-weight 1
+.\run.ps1 -dev comparar --reuse-checkpoint --local-epochs 1          # repite el régimen antiguo
 ```
+
+`comparar_replay.ps1` y `repetir_semillas.ps1` siguen funcionando con sus parámetros antiguos (`-Seeds 42,43`, `-Buffers 0,20`...) y los traducen a estos comandos.
 
 Entrena la fase A, compara los buffers con replay controlado y verifica las métricas desde los pesos (`verificar_cifar100.py`). Con varias semillas genera además `resumen_semillas.csv` y `perdida_A_media_semillas.png`.
 
 ### Pruebas reducidas y piloto
 
 ```powershell
-.\run.ps1 cifar100_three_buffer.py --quick --audit --output-dir resultados/prueba_auditada
-.\run.ps1 verificar_cifar100.py resultados/prueba_auditada
-.\run.ps1 cifar100_three_buffer.py --validation --audit --buffers 0 20 --output-dir resultados/piloto
+.\run.ps1 rapido
+.\run.ps1 python cifar100_three_buffer.py --validation --audit --buffers 0 20 --output-dir resultados/piloto
+.\run.ps1 python verificar_cifar100.py resultados/piloto
 ```
 
 `--quick` usa 2 clientes, 1 ronda, 1 época y 100 muestras por grupo: comprueba el flujo, no el aprendizaje, y no genera gráficos comparativos. `--validation` usa 2 clientes, 500 imágenes por grupo y cliente, y cancela la comparación si el modelo no alcanza unos mínimos de aprendizaje en A, en B y en las propias imágenes del buffer. Esos umbrales son controles operativos, no una certificación científica. Una comparación inconcluyente hace que el verificador termine con código 2.
@@ -106,10 +153,10 @@ Entrena la fase A, compara los buffers con replay controlado y verifica las mét
 ## Tests
 
 ```powershell
-.\run.ps1 unittest
+.\run.ps1 tests
 ```
 
-Cubren el muestreo, los argumentos, FedAvg, los lotes de replay, el preprocesado, las métricas y una ejecución completa de `cifar100_three_buffer.py` con datos sintéticos (unos 2 minutos en CPU). GitHub Actions los ejecuta en cada push (`.github/workflows/tests.yml`).
+Cubren el muestreo, los argumentos, FedAvg, los lotes de replay, el preprocesado, las métricas y una ejecución completa de `cifar100_three_buffer.py` con datos sintéticos (unos 2 minutos en CPU). GitHub Actions los ejecuta en cada push (`.github/workflows/tests.yml`) y además construye la imagen y ejecuta los tests y `rapido` dentro de ella sin red.
 
 ## Datos
 
@@ -117,7 +164,7 @@ Cubren el muestreo, los argumentos, FedAvg, los lotes de replay, el preprocesado
 - **DomainNet:** `wltjr1007/DomainNet` (splits `train` y `test`), fijado al commit `ee20570ae7a29c51571e55a9a17983f7625295d6`.
 - **MVTec AD:** copia local en `data/mvtec_anomaly_detection/`, con una carpeta por categoría (`<categoría>/train/good/*.png`, `<categoría>/test/<tipo>/*.png`). Se obtiene desde el [formulario oficial](https://www.mvtec.com/research-teaching/datasets/mvtec-ad); licencia CC BY-NC-SA 4.0.
 
-La primera ejecución de CIFAR-100 y DomainNet necesita Internet para descargar los datos en la caché.
+CIFAR-100 viene dentro de la imagen y se usa sin conexión. DomainNet se descarga la primera vez en el volumen `cfl-datos` y se conserva entre ejecuciones. MVTec se lee de `data/` en tu carpeta (montada en solo lectura).
 
 ## Resultados históricos
 

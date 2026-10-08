@@ -67,8 +67,13 @@ def apply_args(args, config, parser):
     os.makedirs(args.output_dir, exist_ok=True)
     os.chdir(args.output_dir)
     print(f"[INFO] Resultados en: {os.getcwd()}")
+    try:
+        from reproducibility import environment_info
+        environment = environment_info()
+    except ImportError:  # pragma: no cover - sin PyTorch
+        environment = None
     with open("config.json", "w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=2, default=str)
+        json.dump({**config, "environment": environment}, handle, indent=2, default=str)
     return config
 
 

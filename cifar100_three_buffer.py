@@ -35,11 +35,18 @@ import fl_core
 from cifar100_sampling import balanced_order, balanced_subset
 from cifar100_validation import learning_problem, validate_training_contract
 from experiment_common import plot_loss
-from reproducibility import seed_everything
+from reproducibility import environment_info, seed_everything
 
 GROUP_A = list(range(0, 50))
 GROUP_B = list(range(50, 100))
 DATASET = "uoft-cs/cifar100"
+
+
+def use_preloaded_data():
+    """Con CIFAR-100 dentro de la imagen Docker, no depende de Internet (salvo que se pida explícitamente)."""
+    if os.environ.get("CFL_DATA_PRELOADED") == "1":
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
 
 def default_config():
@@ -184,6 +191,7 @@ class Experiment:
         return fl_core.hf_to_tensors(filtered)
 
     def load_data(self):
+        use_preloaded_data()
         from flwr_datasets import FederatedDataset
 
         cfg = self.config
@@ -460,6 +468,7 @@ def main(argv=None):
     Path("config.json").write_text(json.dumps({
         **config, "quick": args.quick, "validation": args.validation, "audit": args.audit, "buffers": args.buffers,
         "phase1_training_contract": contract, "torch_version": torch.__version__, "cpu_threads": torch.get_num_threads(),
+        "environment": environment_info(),
         "phase1_checkpoint": str(args.phase1_checkpoint) if args.phase1_checkpoint else None,
         "phase1_checkpoint_sha256": hashlib.sha256(args.phase1_checkpoint.read_bytes()).hexdigest() if args.phase1_checkpoint else None,
     }, indent=2), encoding="utf-8")

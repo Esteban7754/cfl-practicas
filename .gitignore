@@ -13,3 +13,6 @@ data/
 # Copias de seguridad locales y registros temporales
 .backup/
 .run_logs/
+
+# Archivos que la app de Claude deja al descargar adjuntos
+Claude outputs/
