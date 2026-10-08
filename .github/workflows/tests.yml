@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Instalar dependencias fijadas (PyTorch CPU)
+        run: python -m pip install -r requirements.lock
+      - name: Tests (sin red; el pipeline usa datos sintéticos)
+        env:
+          MPLBACKEND: Agg
+          HF_DATASETS_OFFLINE: "1"
+        run: python -m unittest -v
+
+  docker:
+    # Construye la imagen completa (con CIFAR-100 dentro) y ejecuta los tests y la
+    # prueba rápida dentro de ella, sin red: garantiza que la imagen es autosuficiente.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Construir la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: cfl-practicas:cpu
+          build-args: |
+            CFL_REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Información del entorno
+        run: docker run --rm --network none cfl-practicas:cpu info
+      - name: Tests dentro de la imagen
+        run: docker run --rm --network none cfl-practicas:cpu tests
+      - name: Prueba rápida con CIFAR-100 real, sin red
+        run: docker run --rm --network none -e HF_HUB_OFFLINE=1 -e HF_DATASETS_OFFLINE=1 cfl-practicas:cpu rapido

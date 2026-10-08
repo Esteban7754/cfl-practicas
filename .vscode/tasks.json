@@ -2,9 +2,25 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Verificar Entorno (test_env.py)",
+            "label": "Tests unitarios (Docker)",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python test_env.py",
+            "command": ".\\run.ps1 -dev tests",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command"
+                        ]
+                    }
+                }
+            },
             "problemMatcher": [],
             "group": {
                 "kind": "test",
@@ -12,9 +28,25 @@
             }
         },
         {
-            "label": "Ejecutar Archivo Actual en Docker",
+            "label": "Ejecutar archivo actual en Docker",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python ${fileBasename}",
+            "command": ".\\run.ps1 -dev python ${relativeFile}",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command"
+                        ]
+                    }
+                }
+            },
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -22,27 +54,91 @@
             }
         },
         {
-            "label": "Ejecutar step_four.py (CIFAR-100 inicial)",
+            "label": "Información del entorno",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python step_four.py",
+            "command": ".\\run.ps1 info",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command"
+                        ]
+                    }
+                }
+            },
             "problemMatcher": []
         },
         {
-            "label": "Ejecutar cifar100_three_buffer.py",
+            "label": "Prueba rápida con CIFAR-100",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python cifar100_three_buffer.py",
+            "command": ".\\run.ps1 rapido",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command"
+                        ]
+                    }
+                }
+            },
             "problemMatcher": []
         },
         {
-            "label": "Ejecutar domainnet.py",
+            "label": "Comparación 0 % / 20 %",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python domainnet.py",
+            "command": ".\\run.ps1 comparar",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command"
+                        ]
+                    }
+                }
+            },
             "problemMatcher": []
         },
         {
-            "label": "Ejecutar three_buffer_v2.py",
+            "label": "Reconstruir la imagen",
             "type": "shell",
-            "command": "docker run --rm -v \"${workspaceFolder}:/workspace\" -v cfl-hf-cache:/cache/huggingface -w /workspace cfl-practicas python three_buffer_v2.py",
+            "command": ".\\run.ps1 construir",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "options": {
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command"
+                        ]
+                    }
+                }
+            },
             "problemMatcher": []
         }
     ]
