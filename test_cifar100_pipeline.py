@@ -45,7 +45,7 @@ def synthetic_split(n_per_class, seed, classes=range(100)):
 class FakeFederatedDataset:
     def __init__(self, dataset, revision, partitioners, seed):
         self.num = partitioners["train"]
-        self.train = synthetic_split(4, seed).shuffle(seed=seed)
+        self.train = synthetic_split(6, seed).shuffle(seed=seed)
         self.test = synthetic_split(2, seed + 1).shuffle(seed=seed)
 
     def load_split(self, split):
