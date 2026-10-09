@@ -41,6 +41,16 @@ class FedAvgTests(unittest.TestCase):
         self.assertEqual(avg["w"].device.type, "cuda")
         torch.testing.assert_close(avg["w"].cpu(), torch.tensor([2.5, 5.0]))
 
+    def test_weight_align_equalizes_norms_without_touching_the_input(self):
+        weight = torch.ones(4, 3)
+        weight[2:] *= 3  # clases nuevas con filas 3 veces más largas
+        state = {"fc.weight": weight, "fc.bias": torch.tensor([1.0, 1.0, 6.0, 6.0])}
+        aligned, gamma = fl_core.weight_align(state, old_classes=[0, 1], new_classes=[2, 3])
+        self.assertAlmostEqual(gamma, 1 / 3, places=6)
+        torch.testing.assert_close(aligned["fc.weight"].norm(dim=1), torch.full((4,), 3 ** 0.5))
+        torch.testing.assert_close(aligned["fc.bias"], torch.tensor([1.0, 1.0, 2.0, 2.0]))
+        self.assertEqual(state["fc.weight"][2, 0].item(), 3.0)  # el original no cambia
+
     def test_rejects_invalid_input(self):
         with self.assertRaises(ValueError):
             fl_core.fedavg([])

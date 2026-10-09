@@ -39,6 +39,12 @@ class CompararTests(unittest.TestCase):
         self.assertIn("agregar_semillas.py", calls[-1][0])
         self.assertIn("--replay-batch-fraction", calls[0][0])
 
+    def test_conjunto_adds_the_joint_baseline_only_when_asked(self):
+        with_joint = commands_of(["comparar", "--conjunto", "--output-dir", "z_test", "--dry-run"])[0][0]
+        without = commands_of(["comparar", "--output-dir", "z_test", "--dry-run"])[0][0]
+        self.assertIn("--joint", with_joint)
+        self.assertNotIn("--joint", without)
+
     def test_rejects_missing_no_replay_and_incoherent_checkpoint(self):
         with self.assertRaises(SystemExit):
             commands_of(["comparar", "--buffers", "10", "20", "--dry-run"])

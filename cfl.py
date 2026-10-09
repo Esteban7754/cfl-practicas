@@ -152,6 +152,8 @@ def cmd_comparar(args):
                    "--distill-weight", str(args.distill_weight), "--output-dir", str(run_dir)]
         if args.replay_mix == "balanced":
             command += ["--replay-batch-fraction", str(args.replay_batch_fraction)]
+        if args.conjunto:
+            command += ["--joint"]
         if args.reuse_checkpoint:
             command += ["--phase1-checkpoint", str(CHECKPOINT), "--no-normalize", "--no-augment"]
         print(f"\n=== Semilla {seed}, {args.local_epochs} épocas locales -> {run_dir}")
@@ -207,6 +209,8 @@ def build_parser():
     comparar.add_argument("--replay-mix", choices=["concat", "balanced"], default="concat")
     comparar.add_argument("--replay-batch-fraction", type=float, default=0.5)
     comparar.add_argument("--distill-weight", type=float, default=0.0)
+    comparar.add_argument("--conjunto", action="store_true",
+                          help="Añade la cota superior (A y B a la vez desde cero); no depende de la variante, basta en una")
     comparar.add_argument("--reuse-checkpoint", action="store_true",
                           help="Reutiliza global_model_phase1.pt (1 época, sin normalización ni aumento)")
     comparar.set_defaults(func=cmd_comparar)

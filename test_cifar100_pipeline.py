@@ -109,6 +109,26 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(a, row["optimizer_steps"] * 16)  # 16 de cada lote de 32 vienen del buffer
         self.assertEqual(len(results), 2)
 
+    def test_joint_baseline_and_weight_aligning(self):
+        plain, _ = self.run_experiment()
+        results, out = self.run_experiment("--joint")
+        # La cota superior va aparte y no altera la secuencia A -> B ni lo que audita el verificador.
+        self.assertEqual([r["step4_acc_a"] for r in results], [r["step4_acc_a"] for r in plain])
+        audit = json.loads((out / "audit.json").read_text())
+        self.assertTrue(all(row["context"]["phase"] in (1, 2) for row in audit["training"]))
+        with open(out / "joint_results.csv", encoding="utf-8") as handle:
+            joint = list(csv.DictReader(handle))
+        self.assertEqual(len(joint), 1)
+        self.assertEqual(int(joint[0]["rounds"]), 2)  # --quick: 1 ronda por fase
+        with open(out / "results.csv", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        for row in rows:
+            self.assertGreater(float(row["wa_gamma"]), 0)
+            self.assertAlmostEqual(float(row["avg_acc_tasks"]), (float(row["step4_acc_a"]) + float(row["step4_acc_b"])) / 2)
+            self.assertAlmostEqual(float(row["bwt_a"]), -float(row["loss_a"]))
+            self.assertAlmostEqual(float(row["gap_all_vs_joint"]),
+                                   float(joint[0]["acc_all_100_classes"]) - float(row["acc_all_100_classes"]))
+
     def test_variant_results_do_not_depend_on_order(self):
         first, _ = self.run_experiment()
         only_20, _ = self.run_experiment("--buffers", "0", "20")

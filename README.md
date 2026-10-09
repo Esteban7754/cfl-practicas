@@ -55,7 +55,7 @@ La primera vez, el lanzador construye la imagen automáticamente: descarga las d
 | `info` | Muestra la revisión del código de la imagen, versiones, hilos, GPU y datos disponibles. |
 | `tests` | Tests unitarios. |
 | `rapido` | `cifar100_three_buffer.py --quick --audit` y verificación independiente. Comprueba el flujo, no el aprendizaje. |
-| `comparar [opciones]` | Comparación de replay con todos los datos, verificada desde los pesos; con varias semillas añade el resumen media ± desviación. Opciones: `--seeds 42 43 44`, `--buffers 0 5 10 20`, `--local-epochs 5`, `--rounds 5`, `--replay-mix balanced`, `--replay-batch-fraction 0.5`, `--distill-weight 1`, `--reuse-checkpoint`, `--threads N`, `--output-dir`, `--dry-run`. |
+| `comparar [opciones]` | Comparación de replay con todos los datos, verificada desde los pesos; con varias semillas añade el resumen media ± desviación. Opciones: `--seeds 42 43 44`, `--buffers 0 5 10 20`, `--local-epochs 5`, `--rounds 5`, `--replay-mix balanced`, `--replay-batch-fraction 0.5`, `--distill-weight 1`, `--conjunto`, `--reuse-checkpoint`, `--threads N`, `--output-dir`, `--dry-run`. |
 | `semillas SCRIPT [opciones]` | Repite `cifar100_three_buffer.py`, `domainnet.py`, `mvtecad_all_experiments.py` o `legacy/three_buffer_v2.py` con `--seeds` y resume. El resto de argumentos se pasa al script. |
 | `construir` | Reconstruye la imagen con el código actual. |
 | `python ...`, `bash` | Cualquier comando dentro del contenedor. |
@@ -120,6 +120,9 @@ El Python nativo de Windows de este equipo no puede cargar `torch.dll` (WinError
 | `--normalize` / `--no-normalize`, `--augment` / `--no-augment` | Normalización de CIFAR-100 y aumento de datos (recorte con relleno y volteo), activados por defecto. |
 | `--phase1-checkpoint RUTA` | Reutiliza unos pesos de fase A. Exige su manifiesto (`.config.json`) y comprueba que coinciden los clientes, la semilla, los datos y el preprocesado. |
 | `--audit` | Guarda diagnósticos y pesos para `verificar_cifar100.py`. |
+| `--joint` | Añade la cota superior: entrenamiento conjunto A+B desde cero con el mismo presupuesto (2 × rondas, mismos pasos por ronda). Va a `joint_results.csv` y añade a `results.csv` la distancia a esa cota (`gap_all_vs_joint`, `intransigence_b`). En `cfl comparar` es `--conjunto`; no depende de la variante, así que basta con pedirlo en una. |
+
+Cada fila de `results.csv` incluye además las métricas estándar de aprendizaje continuo para dos tareas (`avg_acc_tasks`, precisión media por tarea; `bwt_a`, *backward transfer*) y el mismo modelo evaluado con **Weight Aligning** (columnas `wa_*`): la capa final reescalada para que las clases B no tengan pesos más grandes que las A. Es una corrección posterior, no cambia el entrenamiento, y `verificar_cifar100.py` la recalcula por su cuenta.
 
 Al entrenar la fase A, cada ejecución guarda `phase1_checkpoint.pt` y `phase1_checkpoint.config.json` para reutilizarlos más adelante.
 
@@ -133,6 +136,7 @@ DomainNet y MVTec aceptan `--seed`, `--buffers`, `--rounds`, `--local-epochs`, `
 .\run.ps1 comparar                                                   # 0 % frente a 20 %, 5 épocas locales
 .\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20              # varias semillas, con resumen
 .\run.ps1 comparar --seeds 42 43 44 --buffers 0 20 --replay-mix balanced --distill-weight 1
+.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20 --conjunto   # con la cota superior
 .\run.ps1 -dev comparar --reuse-checkpoint --local-epochs 1          # repite el régimen antiguo
 ```
 

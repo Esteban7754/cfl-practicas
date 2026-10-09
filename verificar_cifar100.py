@@ -58,6 +58,16 @@ def new_model():
     return model
 
 
+def weight_aligned(model):
+    """Weight Aligning reimplementado aparte: iguala la norma media de las filas B (50-99) a la de A (0-49)."""
+    with torch.no_grad():
+        weight, bias = model.fc.weight, model.fc.bias
+        gamma = weight[:50].norm(dim=1).mean() / weight[50:].norm(dim=1).mean()
+        weight[50:] *= gamma
+        bias[50:] *= gamma
+    return model
+
+
 def evaluate(model, images, labels, keep_indices=None):
     model.eval()
     predictions = []
@@ -176,6 +186,15 @@ def main():
         for key, value in expected.items():
             assert abs(float(row[key]) - value) < 1e-10, (pct, key, row[key], value)
     result["checks"]["all_csv_metrics_match_independent_evaluation"] = True
+    if rows and rows[0].get("wa_acc_a") not in (None, ""):
+        for row, pct in zip(rows, buffers):
+            model = new_model()
+            model.load_state_dict(torch.load(args.audit_dir / f"audit_phase2_{pct}.pt", map_location="cpu", weights_only=True))
+            weight_aligned(model)
+            for name, key in (("A", "wa_acc_a"), ("B", "wa_acc_b")):
+                value = evaluate(model, *tensors_by_group[name])["accuracy_percent"]
+                assert abs(float(row[key]) - value) < 1e-10, (pct, key, row[key], value)
+        result["checks"]["weight_aligning_metrics_match_independent_evaluation"] = True
     initial_weights = audit["phase2_initial_weights"]
     assert len(initial_weights) == len(buffers) and all(
         value == audit["phase1_weights_sha256"] for value in initial_weights.values()

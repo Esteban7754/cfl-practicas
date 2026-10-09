@@ -72,6 +72,28 @@ def fedavg(state_dicts: Sequence[dict], weights: Optional[Sequence[float]] = Non
     return averaged
 
 
+def weight_align(state_dict: dict, old_classes: Sequence[int], new_classes: Sequence[int],
+                 layer: str = "fc") -> tuple:
+    """Weight Aligning (Zhao et al., CVPR 2020): corrige el sesgo de la capa final hacia las clases nuevas.
+
+    Escala las filas de las clases nuevas para que su norma media iguale a la de
+    las antiguas: ``gamma = media(|w_antiguas|) / media(|w_nuevas|)``. El sesgo de
+    esas clases se escala igual, así cada logit nuevo queda multiplicado por
+    ``gamma``. Es una corrección posterior: no toca el entrenamiento. Devuelve
+    una copia corregida del ``state_dict`` y ``gamma``.
+    """
+    aligned = {key: value.clone() for key, value in state_dict.items()}
+    weight = aligned[f"{layer}.weight"]
+    old = torch.as_tensor(list(old_classes), device=weight.device)
+    new = torch.as_tensor(list(new_classes), device=weight.device)
+    gamma = weight[old].norm(dim=1).mean() / weight[new].norm(dim=1).mean()
+    weight[new] *= gamma
+    bias = aligned.get(f"{layer}.bias")
+    if bias is not None:
+        bias[new] *= gamma
+    return aligned, gamma.item()
+
+
 def weights_digest(model: nn.Module) -> str:
     import hashlib
 

@@ -12,6 +12,13 @@ Variantes de replay (combinables):
                           buffer (--replay-batch-fraction, 0.5 por defecto).
   --distill-weight L      añade destilación (LwF) sobre los logits de A.
 
+Referencias y métricas añadidas a cada ejecución:
+  Weight Aligning (WA)    corrección posterior del sesgo de la capa final hacia B,
+                          evaluada sobre el mismo modelo (columnas wa_*).
+  avg_acc_tasks, bwt_a    precisión media por tarea y backward transfer.
+  --joint                 cota superior: A y B a la vez desde cero con el mismo
+                          presupuesto (joint_results.csv y columnas *_vs_joint).
+
 Preprocesado: normalización con las medias de CIFAR-100 y aumento de datos
 (recorte con relleno y volteo) activados por defecto; --no-normalize y
 --no-augment reproducen el protocolo antiguo (necesario para reutilizar
@@ -92,6 +99,8 @@ def build_parser():
                         help="Con --replay-mix balanced: fracción de cada lote que sale del buffer")
     parser.add_argument("--distill-weight", type=float, default=0.0,
                         help="Peso de la destilación sobre las clases A respecto al modelo de la fase A (0 = sin destilación)")
+    parser.add_argument("--joint", action="store_true",
+                        help="Añade la cota superior: entrenamiento conjunto A+B desde cero con el mismo presupuesto")
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True,
                         help="Normaliza con media/desviación de CIFAR-100")
     parser.add_argument("--augment", action=argparse.BooleanOptionalAction, default=True,
@@ -129,7 +138,7 @@ def resolve_config(args, parser):
     config.update(normalize=args.normalize, augment=args.augment, controlled_replay=controlled,
                   replay_mix=args.replay_mix,
                   replay_batch_fraction=args.replay_batch_fraction if args.replay_mix == "balanced" else None,
-                  distill_weight=args.distill_weight)
+                  distill_weight=args.distill_weight, joint_baseline=args.joint)
 
     contract = None
     if args.phase1_checkpoint:
@@ -221,13 +230,13 @@ class Experiment:
             self.audit["evaluation"].append({"context": dict(self.context), **result})
         return result
 
-    def local_round(self, global_model, batches_for_client, generator, teacher=None):
+    def local_round(self, global_model, batches_for_client, generator, teacher=None, audit=True):
         weights = []
         for client in range(self.config["num_clients"]):
             self.context["client"] = client
             local = fl_core.get_model().to(self.device)
             local.load_state_dict(global_model.state_dict())
-            record = {} if self.args.audit else None
+            record = {} if self.args.audit and audit else None
             weights.append(fl_core.train_local(
                 local, batches_for_client(client), self.config["lr"], self.device, self.preprocess,
                 augment=self.config["augment"], generator=generator, teacher=teacher,
@@ -367,7 +376,15 @@ class Experiment:
                 xs, ys = torch.cat([b[0] for b in sets]), torch.cat([b[1] for b in sets])
                 extra["train_acc_replay"] = fl_core.evaluate(model, xs, ys, self.device, self.preprocess)["accuracy_percent"]
             print(f"[CONTROL] B en entrenamiento: {extra['train_acc_b']:.2f}%; replay: {extra['train_acc_replay']}")
-        del teacher
+
+        # Weight Aligning: el mismo modelo con la capa final corregida (no cambia el entrenamiento).
+        wa_state, wa_gamma = fl_core.weight_align(model.state_dict(), GROUP_A, GROUP_B)
+        wa_model = fl_core.get_model().to(self.device)
+        wa_model.load_state_dict(wa_state)
+        wa_a = fl_core.evaluate(wa_model, *self.test_a, self.device, self.preprocess, group_a_classes=GROUP_A)
+        wa_b = fl_core.evaluate(wa_model, *self.test_b, self.device, self.preprocess)
+        print(f"[WA] gamma = {wa_gamma:.3f} -> A: {wa_a['accuracy_percent']:.2f}% | B: {wa_b['accuracy_percent']:.2f}%")
+        del teacher, wa_model
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -387,8 +404,52 @@ class Experiment:
             "pred_share_b_on_test_a": final_a["pred_share_b_percent"],
             "cross_entropy_a": final_a["mean_cross_entropy"],
             "buffer_samples": replay_total,
+            # Métricas estándar de aprendizaje continuo (2 tareas): media por tarea y backward transfer.
+            "avg_acc_tasks": (acc_a + acc_b) / 2,
+            "bwt_a": acc_a - self.base_acc_a,
+            "wa_gamma": wa_gamma,
+            "wa_acc_a": wa_a["accuracy_percent"],
+            "wa_acc_b": wa_b["accuracy_percent"],
+            "wa_acc_all_100_classes": (wa_a["correct"] + wa_b["correct"]) * 100 / (n_a + n_b),
+            "wa_retention_a_percent": fl_core.retention_percent(self.base_acc_a, wa_a["accuracy_percent"]),
+            "wa_avg_acc_tasks": (wa_a["accuracy_percent"] + wa_b["accuracy_percent"]) / 2,
+            "wa_bwt_a": wa_a["accuracy_percent"] - self.base_acc_a,
             **extra,
         }
+
+    def joint(self):
+        """Cota superior: A y B a la vez desde cero, con el mismo presupuesto que fase 1 + fase 2.
+
+        Mismas rondas en total (2 × num_rounds) y los mismos pasos por ronda que una
+        ronda de fase. No entra en audit.json ni en results.csv: el verificador audita
+        solo la secuencia A → B, y esta referencia va a joint_results.csv.
+        """
+        cfg = self.config
+        seed_everything(cfg["seed"])
+        rounds = 2 * cfg["num_rounds"]
+        print(f"\n=== COTA SUPERIOR: ENTRENAMIENTO CONJUNTO A+B ({rounds} rondas, mismo presupuesto) ===")
+        model = fl_core.get_model().to(self.device)
+        generator = torch.Generator().manual_seed(cfg["seed"] + 2)
+        for r in range(rounds):
+            self.context = {"phase": "joint", "round": r + 1}
+
+            def batches(client):
+                ax, ay = self.train_a[client]
+                bx, by = self.train_b[client]
+                steps = fl_core.steps_per_epoch((len(ay) + len(by)) // 2, cfg["batch_size"]) * cfg["local_epochs"]
+                return fl_core.concat_batches(ax, ay, bx, by, cfg["batch_size"], cfg["local_epochs"],
+                                              max_steps=steps, generator=generator)
+
+            self.local_round(model, batches, generator, audit=False)
+            acc_a = fl_core.evaluate(model, *self.test_a, self.device, self.preprocess)["accuracy_percent"]
+            acc_b = fl_core.evaluate(model, *self.test_b, self.device, self.preprocess)["accuracy_percent"]
+            print(f"Conjunto - Ronda {r + 1}/{rounds} -> A: {acc_a:.2f}% | B: {acc_b:.2f}%")
+        final_a = fl_core.evaluate(model, *self.test_a, self.device, self.preprocess, group_a_classes=GROUP_A)
+        final_b = fl_core.evaluate(model, *self.test_b, self.device, self.preprocess)
+        acc_a, acc_b = final_a["accuracy_percent"], final_b["accuracy_percent"]
+        return {"fraction": "Conjunto A+B", "rounds": rounds, "acc_a": acc_a, "acc_b": acc_b,
+                "acc_all_100_classes": (final_a["correct"] + final_b["correct"]) * 100 / (final_a["total"] + final_b["total"]),
+                "avg_acc_tasks": (acc_a + acc_b) / 2}
 
     # ---------------------------------------------------------- ejecución
     def run(self):
@@ -408,6 +469,14 @@ class Experiment:
                     self.status["reason"] = f"{problem} con buffer {percent}%; comparación no validada"
                     self.save_status()
                     raise RuntimeError(self.status["reason"])
+        joint = None
+        if args.joint:
+            joint = self.joint()
+            write_csv("joint_results.csv", [joint])
+            for r in results:
+                r["gap_all_vs_joint"] = joint["acc_all_100_classes"] - r["acc_all_100_classes"]
+                r["wa_gap_all_vs_joint"] = joint["acc_all_100_classes"] - r["wa_acc_all_100_classes"]
+                r["intransigence_b"] = joint["acc_b"] - r["step4_acc_b"]
         self.status.update(
             comparison_valid=args.validation,
             reason=("Controles mínimos del piloto superados; no sustituye varias semillas ni el experimento completo"
@@ -415,7 +484,7 @@ class Experiment:
                     else "Ejecución completa; revisar aprendizaje y replicar con varias semillas"))
         self.save_status()
         write_csv("results.csv", results)
-        print_table(results)
+        print_table(results, joint)
         if args.quick:
             print("[INFO] Prueba funcional: se omiten los gráficos comparativos porque no validan aprendizaje.")
         else:
@@ -437,19 +506,28 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
-def print_table(results):
-    width = 118
+def print_table(results, joint=None):
+    width = 146
     print("\n" + "=" * width)
     print(f"{'Método':<14} | {'A antes':>8} | {'A después':>9} | {'B después':>9} | {'Pérdida A':>10} | "
-          f"{'Retención':>9} | {'A (grupo)':>9} | {'Pred. B en A':>12} | {'100 clases':>10}")
+          f"{'Retención':>9} | {'A (grupo)':>9} | {'Pred. B en A':>12} | {'100 clases':>10} | "
+          f"{'A con WA':>8} | {'100 cl. WA':>10}")
     print("-" * width)
     for r in results:
         retention = "—" if r["retention_a_percent"] is None else f"{r['retention_a_percent']:.1f}%"
         print(f"{r['fraction']:<14} | {r['step3_acc_a']:>7.2f}% | {r['step4_acc_a']:>8.2f}% | {r['step4_acc_b']:>8.2f}% | "
               f"{r['loss_a']:>7.2f} pp | {retention:>9} | {r['group_aware_acc_a']:>8.2f}% | "
-              f"{r['pred_share_b_on_test_a']:>11.1f}% | {r['acc_all_100_classes']:>9.2f}%")
+              f"{r['pred_share_b_on_test_a']:>11.1f}% | {r['acc_all_100_classes']:>9.2f}% | "
+              f"{r['wa_acc_a']:>7.2f}% | {r['wa_acc_all_100_classes']:>9.2f}%")
+    if joint:
+        print("-" * width)
+        print(f"{joint['fraction']:<14} | {'—':>8} | {joint['acc_a']:>8.2f}% | {joint['acc_b']:>8.2f}% | {'':>10} | "
+              f"{'':>9} | {'':>9} | {'':>12} | {joint['acc_all_100_classes']:>9.2f}% | {'':>8} | {'':>10}")
     print("=" * width)
     print("Pérdida A = A antes − A después (pp). «A (grupo)» restringe la predicción a las clases A (diagnóstico).")
+    print("WA = Weight Aligning: el mismo modelo con la capa final reescalada para no favorecer a B.")
+    if joint:
+        print("Conjunto A+B = cota superior: A y B a la vez desde cero, con el mismo presupuesto de rondas y pasos.")
 
 
 def main(argv=None):
