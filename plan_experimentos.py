@@ -56,6 +56,16 @@ def command(task):
     return [sys.executable, "cifar100_three_buffer.py", *task["args"], "--output-dir", str(task["dir"])]
 
 
+def gpu_count():
+    """GPUs visibles (0 sin GPU). Con varias, las tareas se reparten entre ellas."""
+    try:
+        import torch
+
+        return torch.cuda.device_count()
+    except Exception:  # sin torch o sin CUDA: se ejecuta todo en CPU
+        return 0
+
+
 def last_progress(log):
     try:
         lines = [l for l in log.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -85,8 +95,10 @@ def run_plan(plan, args):
     status = {t["id"]: ("hecha" if is_done(t) else "pendiente") for t in tasks}
     running = {}
     start = time.time()
+    gpus = gpu_count() if "CUDA_VISIBLE_DEVICES" not in os.environ else 0
     print(f"[PLAN] {plan['nombre']}: {len(pending)} tareas pendientes de {len(tasks)}; {parallel} en paralelo, "
-          f"{threads} hilos de CPU cada una. Resultados en {plan['salida']}", flush=True)
+          f"{threads} hilos de CPU cada una{f', repartidas entre {gpus} GPU' if gpus > 1 else ''}. "
+          f"Resultados en {plan['salida']}", flush=True)
 
     def stop_all(*_):
         print("\n[PLAN] Deteniendo todas las tareas en curso...", flush=True)
@@ -103,13 +115,13 @@ def run_plan(plan, args):
 
     previous = signal.signal(signal.SIGINT, stop_all), signal.signal(signal.SIGTERM, stop_all)
     try:
-        return schedule(pending, running, status, tasks, parallel, env, logs, out, start, args)
+        return schedule(pending, running, status, tasks, parallel, env, logs, out, start, args, gpus)
     finally:
         signal.signal(signal.SIGINT, previous[0])
         signal.signal(signal.SIGTERM, previous[1])
 
 
-def schedule(pending, running, status, tasks, parallel, env, logs, out, start, args):
+def schedule(pending, running, status, tasks, parallel, env, logs, out, start, args, gpus=0):
     next_report = 0.0
     while pending or running:
         for tid, (proc, task, handle) in list(running.items()):
@@ -136,11 +148,16 @@ def schedule(pending, running, status, tasks, parallel, env, logs, out, start, a
                 folder.rename(folder.with_name(f"{folder.name}_incompleta_{datetime.now():%Y%m%d_%H%M%S}"))
             folder.parent.mkdir(parents=True, exist_ok=True)
             handle = open(logs / f"{task['id']}.log", "w", encoding="utf-8")
-            proc = subprocess.Popen(command(task), cwd=ROOT, env=env, stdout=handle, stderr=subprocess.STDOUT)
+            task_env, where = env, ""
+            if gpus > 1:  # a la GPU con menos tareas en curso
+                load = [sum(t.get("gpu") == g for _p, t, _h in running.values()) for g in range(gpus)]
+                task["gpu"] = load.index(min(load))
+                task_env, where = {**env, "CUDA_VISIBLE_DEVICES": str(task["gpu"])}, f" (GPU {task['gpu']})"
+            proc = subprocess.Popen(command(task), cwd=ROOT, env=task_env, stdout=handle, stderr=subprocess.STDOUT)
             running[task["id"]] = (proc, task, handle)
             status[task["id"]] = "en curso"
             pending.remove(task)
-            print(f"[PLAN] INICIO {task['id']}", flush=True)
+            print(f"[PLAN] INICIO {task['id']}{where}", flush=True)
         if time.time() >= next_report and running:
             done = sum(s == "hecha" for s in status.values())
             print(f"--- {(time.time() - start) / 3600:.2f} h | hechas {done}/{len(tasks)} | "

@@ -65,6 +65,21 @@ class RunTests(unittest.TestCase):
             self.assertTrue(list((ROOT / out / "_fase1").glob("dir_seed42_incompleta_*")))
 
 
+class GpuTests(unittest.TestCase):
+    def test_tasks_are_spread_over_the_gpus(self):
+        record = ("import os, sys, pathlib; p = pathlib.Path(sys.argv[1]); p.mkdir(parents=True, exist_ok=True); "
+                  "(p / sys.argv[2]).write_text(os.environ.get('CUDA_VISIBLE_DEVICES', 'ninguna'))")
+        with tempfile.TemporaryDirectory(dir=ROOT / "resultados") as tmp, \
+                mock.patch.object(plan_experimentos, "gpu_count", return_value=2), \
+                mock.patch.dict(plan_experimentos.os.environ, {}, clear=False) as env:
+            env.pop("CUDA_VISIBLE_DEVICES", None)
+            out = Path(tmp).relative_to(ROOT)
+            code, _ = RunTests.run_with(self, record, out)
+            self.assertEqual(code, 0)
+            used = {p.read_text() for p in (ROOT / out).rglob("*") if p.name in ("results.csv", "phase1_checkpoint.pt")}
+            self.assertEqual(used, {"0", "1"})
+
+
 class ReportTests(unittest.TestCase):
     def test_report_handles_partial_results(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "resultados") as tmp:

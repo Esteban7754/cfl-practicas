@@ -1,0 +1,251 @@
+{
+  "nombre": "plan_kaggle",
+  "descripcion": "Todos los experimentos de plan_gpu.json, solo con la semilla 42, para comprobar el código en las T4 de Kaggle y comparar con la misma semilla en otra GPU.",
+  "salida": "resultados/plan_kaggle",
+  "paralelo": 3,
+  "comun": [
+    "--controlled-replay",
+    "--audit",
+    "--local-epochs",
+    "5",
+    "--rounds",
+    "5"
+  ],
+  "fase1": {
+    "iid": [],
+    "dir05": [
+      "--partition",
+      "dirichlet",
+      "--dirichlet-alpha",
+      "0.5"
+    ],
+    "dir01": [
+      "--partition",
+      "dirichlet",
+      "--dirichlet-alpha",
+      "0.1"
+    ]
+  },
+  "trabajos": [
+    {
+      "id": "principal_normal",
+      "titulo": "Mezcla normal",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "5",
+        "10",
+        "20"
+      ]
+    },
+    {
+      "id": "principal_equilibrados",
+      "titulo": "Lotes equilibrados (0,5)",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "5",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--joint"
+      ]
+    },
+    {
+      "id": "principal_lwf",
+      "titulo": "Lotes equilibrados + LwF",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "5",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--distill-weight",
+        "1"
+      ]
+    },
+    {
+      "id": "fraccion_natural",
+      "titulo": "Equilibrados, fracción natural",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--replay-batch-fraction",
+        "natural"
+      ]
+    },
+    {
+      "id": "fraccion_025",
+      "titulo": "Equilibrados, fracción 0,25",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--replay-batch-fraction",
+        "0.25"
+      ]
+    },
+    {
+      "id": "fraccion_075",
+      "titulo": "Equilibrados, fracción 0,75",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--replay-batch-fraction",
+        "0.75"
+      ]
+    },
+    {
+      "id": "er_ace",
+      "titulo": "Lotes equilibrados + ER-ACE",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "5",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--loss",
+        "ace"
+      ]
+    },
+    {
+      "id": "conjunto_2x",
+      "titulo": "Referencia conjunta, presupuesto x2",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "--joint",
+        "--joint-budget-factor",
+        "2",
+        "--crt-epochs",
+        "0"
+      ]
+    },
+    {
+      "id": "calendario",
+      "titulo": "Equilibrados, calendario 0,75-0,5-0,25-0,25-0,25",
+      "fase1": "iid",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced",
+        "--replay-fraction-schedule",
+        "0.75,0.5,0.25,0.25,0.25"
+      ]
+    },
+    {
+      "id": "dirichlet05_normal",
+      "titulo": "Dirichlet 0,5, mezcla normal",
+      "fase1": "dir05",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20"
+      ]
+    },
+    {
+      "id": "dirichlet05_equilibrados",
+      "titulo": "Dirichlet 0,5, lotes equilibrados",
+      "fase1": "dir05",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced"
+      ]
+    },
+    {
+      "id": "dirichlet01_normal",
+      "titulo": "Dirichlet 0,1, mezcla normal",
+      "fase1": "dir01",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20"
+      ]
+    },
+    {
+      "id": "dirichlet01_equilibrados",
+      "titulo": "Dirichlet 0,1, lotes equilibrados",
+      "fase1": "dir01",
+      "semillas": [
+        42
+      ],
+      "args": [
+        "--buffers",
+        "0",
+        "10",
+        "20",
+        "--replay-mix",
+        "balanced"
+      ]
+    }
+  ]
+}
