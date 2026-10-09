@@ -73,7 +73,7 @@ def fedavg(state_dicts: Sequence[dict], weights: Optional[Sequence[float]] = Non
 
 
 def weight_align(state_dict: dict, old_classes: Sequence[int], new_classes: Sequence[int],
-                 layer: str = "fc") -> tuple:
+                 layer: str = "fc", scale_weight: bool = True, scale_bias: bool = True) -> tuple:
     """Weight Aligning (Zhao et al., CVPR 2020): corrige el sesgo de la capa final hacia las clases nuevas.
 
     Escala las filas de las clases nuevas para que su norma media iguale a la de
@@ -87,9 +87,10 @@ def weight_align(state_dict: dict, old_classes: Sequence[int], new_classes: Sequ
     old = torch.as_tensor(list(old_classes), device=weight.device)
     new = torch.as_tensor(list(new_classes), device=weight.device)
     gamma = weight[old].norm(dim=1).mean() / weight[new].norm(dim=1).mean()
-    weight[new] *= gamma
+    if scale_weight:
+        weight[new] *= gamma
     bias = aligned.get(f"{layer}.bias")
-    if bias is not None:
+    if bias is not None and scale_bias:
         bias[new] *= gamma
     return aligned, gamma.item()
 
@@ -231,16 +232,38 @@ def distillation_loss(student_logits, teacher_logits, old_classes: Sequence[int]
     return F.kl_div(s, t, reduction="batchmean") * temperature ** 2
 
 
+def ace_loss(logits, labels, new_classes: Sequence[int]):
+    """Entropía cruzada asimétrica de ER-ACE (Caccia et al., ICLR 2022).
+
+    Las muestras de clases nuevas solo compiten entre clases nuevas (las logits
+    del resto se enmascaran); las del buffer usan la entropía cruzada completa.
+    Así el gradiente de los datos nuevos no empuja hacia abajo las clases antiguas.
+    """
+    new = torch.zeros(logits.shape[1], dtype=torch.bool, device=logits.device)
+    new[torch.as_tensor(list(new_classes), device=logits.device)] = True
+    is_new = new[labels]
+    masked = logits.masked_fill(is_new.unsqueeze(1) & ~new.unsqueeze(0), float("-inf"))
+    return F.cross_entropy(torch.where(is_new.unsqueeze(1), masked, logits), labels)
+
+
 def train_local(model, batches, lr, device, preprocess: Optional[Callable] = None, augment=False,
                 generator=None, teacher=None, distill_weight=0.0, old_classes=None,
-                record: Optional[dict] = None):
+                record: Optional[dict] = None, ace_new_classes: Optional[Sequence[int]] = None,
+                classifier_only: bool = False):
     """Entrena con Adam sobre un iterable de lotes y devuelve el ``state_dict``.
 
     ``record`` (opcional) recibe pasos, pérdidas, etiquetas vistas y el cambio
     de la capa final, el formato que espera ``verificar_cifar100.py``.
+    ``ace_new_classes``: usa la pérdida de ER-ACE en vez de la entropía cruzada.
+    ``classifier_only``: solo se entrena la capa final, con el resto en modo
+    evaluación (BatchNorm no actualiza sus estadísticas); es el cRT.
     """
-    model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    if classifier_only:
+        model.eval()
+        optimizer = torch.optim.Adam(model.fc.parameters(), lr=lr)
+    else:
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     fc_before = model.fc.weight.detach().clone() if record is not None else None
     losses, labels_seen = [], Counter()
     if teacher is not None:
@@ -250,7 +273,7 @@ def train_local(model, batches, lr, device, preprocess: Optional[Callable] = Non
         xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad()
         logits = model(xb)
-        loss = F.cross_entropy(logits, yb)
+        loss = ace_loss(logits, yb, ace_new_classes) if ace_new_classes is not None else F.cross_entropy(logits, yb)
         if teacher is not None and distill_weight > 0:
             with torch.no_grad():
                 teacher_logits = teacher(xb)
@@ -287,6 +310,7 @@ def evaluate(model, x, y, device, preprocess: Optional[Callable] = None, batch_s
     if total == 0:
         raise RuntimeError("La evaluación no contiene muestras")
     correct, group_correct, loss_sum, pred_a = 0, 0, 0.0, 0
+    logit_sum_a = logit_sum_b = 0.0
     predictions, targets = Counter(), Counter()
     mask_a = None
     for start in range(0, total, batch_size):
@@ -307,13 +331,17 @@ def evaluate(model, x, y, device, preprocess: Optional[Callable] = None, batch_s
             masked = logits.masked_fill(~(mask_a.unsqueeze(0) == in_a.unsqueeze(1)), float("-inf"))
             group_correct += (masked.argmax(dim=1) == yb).sum().item()
             pred_a += mask_a[pred].sum().item()
+            logit_sum_a += logits[:, mask_a].mean(dim=1).sum().item()
+            logit_sum_b += logits[:, ~mask_a].mean(dim=1).sum().item()
     result = {"correct": correct, "total": total, "accuracy_percent": 100 * correct / total,
               "mean_cross_entropy": loss_sum / total,
               "prediction_counts": dict(predictions), "target_counts": dict(targets)}
     if group_a_classes is not None:
         result.update({"group_aware_accuracy_percent": 100 * group_correct / total,
                        "pred_share_a_percent": 100 * pred_a / total,
-                       "pred_share_b_percent": 100 * (total - pred_a) / total})
+                       "pred_share_b_percent": 100 * (total - pred_a) / total,
+                       # Logit media de las clases A y de las B sobre estas imágenes (diagnóstico de WA).
+                       "mean_logit_a": logit_sum_a / total, "mean_logit_b": logit_sum_b / total})
     return result
 
 

@@ -1,0 +1,28 @@
+{
+  "nombre": "plan_prueba",
+  "descripcion": "Prueba rápida del plan completo (--quick: pocas imágenes, 1 ronda). Comprueba que todo funciona de punta a punta en unos minutos; las precisiones no significan nada.",
+  "salida": "resultados/plan_prueba",
+  "paralelo": 3,
+  "comun": ["--quick", "--audit"],
+  "fase1": {
+    "iid": [],
+    "dir05": ["--partition", "dirichlet", "--dirichlet-alpha", "0.5"]
+  },
+  "trabajos": [
+    {"id": "principal_normal", "titulo": "Mezcla normal", "fase1": "iid", "semillas": [42, 43], "args": ["--buffers", "0", "10", "20"]},
+    {"id": "principal_equilibrados", "titulo": "Lotes equilibrados (0,5)", "fase1": "iid", "semillas": [42, 43],
+     "args": ["--buffers", "0", "10", "20", "--replay-mix", "balanced", "--joint"]},
+    {"id": "fraccion_natural", "titulo": "Equilibrados, fracción natural", "fase1": "iid", "semillas": [42],
+     "args": ["--buffers", "0", "10", "20", "--replay-mix", "balanced", "--replay-batch-fraction", "natural"]},
+    {"id": "fraccion_025", "titulo": "Equilibrados, fracción 0,25", "fase1": "iid", "semillas": [42],
+     "args": ["--buffers", "0", "10", "20", "--replay-mix", "balanced", "--replay-batch-fraction", "0.25"]},
+    {"id": "er_ace", "titulo": "Lotes equilibrados + ER-ACE", "fase1": "iid", "semillas": [42],
+     "args": ["--buffers", "0", "10", "20", "--replay-mix", "balanced", "--loss", "ace"]},
+    {"id": "conjunto_2x", "titulo": "Referencia conjunta x2", "fase1": "iid", "semillas": [42],
+     "args": ["--buffers", "0", "--joint", "--joint-budget-factor", "2", "--crt-epochs", "0"]},
+    {"id": "calendario", "titulo": "Equilibrados, calendario", "fase1": "iid", "semillas": [42],
+     "args": ["--buffers", "0", "10", "20", "--replay-mix", "balanced", "--replay-fraction-schedule", "0.75"]},
+    {"id": "dirichlet05_equilibrados", "titulo": "Dirichlet 0,5, lotes equilibrados", "fase1": "dir05", "semillas": [42],
+     "args": ["--buffers", "0", "10", "20", "--replay-mix", "balanced"]}
+  ]
+}

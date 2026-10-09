@@ -144,6 +144,19 @@ DomainNet y MVTec aceptan `--seed`, `--buffers`, `--rounds`, `--local-epochs`, `
 
 Entrena la fase A, compara los buffers con replay controlado y verifica las métricas desde los pesos (`verificar_cifar100.py`). Con varias semillas genera además `resumen_semillas.csv` y `perdida_A_media_semillas.png`.
 
+### Plan completo en una GPU NVIDIA
+
+```powershell
+.\lanzar_gpu.ps1                 # comprueba la GPU, construye la imagen CUDA, pasa los tests y ejecuta el plan
+.\lanzar_gpu.ps1 -Simular        # lista las tareas pendientes sin ejecutarlas
+.\lanzar_gpu.ps1 -SoloPlan       # reanuda el plan tras un corte (sin reconstruir ni pasar los tests)
+.\run.ps1 -dev plan planes/plan_prueba.json   # el mismo plan en miniatura (--quick), en CPU, en minutos
+```
+
+`planes/plan_gpu.json` define los experimentos por orden de prioridad: las tres variantes con 5 semillas (42-46), la ablación de la fracción del lote (natural, 0,25, 0,75), ER-ACE, la referencia conjunta con presupuesto ×2, el replay con calendario (0,75-0,5-0,25-0,25-0,25) y el reparto Dirichlet (α = 0,5 y 0,1) con mezcla normal y lotes equilibrados. `plan_experimentos.py` entrena la fase 1 una sola vez por semilla y reparto, lanza varias tareas a la vez en la GPU, se puede reanudar (salta lo terminado y aparta lo que quedó a medias) y un solo Ctrl+C lo detiene todo. Al terminar agrega las semillas y `informe_plan.py` escribe `resultados/plan_gpu/INFORME.md` con tablas (media ± desviación) y gráficas. El progreso queda en `resultados/plan_gpu/_registros/` y `estado.json`.
+
+Cada fila de `results.csv` incluye además, sin coste de entrenamiento apreciable: WA completo, solo pesos y solo sesgo (`wa_*`, `wa_w_*`, `wa_b_*`), las logits medias de las clases A y B sobre el test de A (`mean_logit_*`) y cRT, la capa final reentrenada con el buffer y otras tantas imágenes de B (`crt_*`).
+
 ### Pruebas reducidas y piloto
 
 ```powershell

@@ -44,7 +44,8 @@ def synthetic_split(n_per_class, seed, classes=range(100)):
 
 class FakeFederatedDataset:
     def __init__(self, dataset, revision, partitioners, seed):
-        self.num = partitioners["train"]
+        partitioner = partitioners["train"]  # un número (IID) o un DirichletPartitioner
+        self.num = partitioner if isinstance(partitioner, int) else partitioner._num_partitions  # sin dataset asignado
         self.train = synthetic_split(6, seed).shuffle(seed=seed)
         self.test = synthetic_split(2, seed + 1).shuffle(seed=seed)
 
@@ -128,6 +129,32 @@ class PipelineTests(unittest.TestCase):
             self.assertAlmostEqual(float(row["bwt_a"]), -float(row["loss_a"]))
             self.assertAlmostEqual(float(row["gap_all_vs_joint"]),
                                    float(joint[0]["acc_all_100_classes"]) - float(row["acc_all_100_classes"]))
+
+    def test_phase1_saved_once_and_reused_gives_the_same_results(self):
+        _, p1 = self.run_experiment("--only-phase1")
+        self.assertTrue((p1 / "phase1_checkpoint.pt").is_file())
+        self.assertFalse((p1 / "results.csv").exists())
+        reused, _ = self.run_experiment("--phase1-checkpoint", str(p1 / "phase1_checkpoint.pt"))
+        trained, _ = self.run_experiment()
+        self.assertEqual([r["step4_acc_a"] for r in reused], [r["step4_acc_a"] for r in trained])
+        self.assertEqual([r["step4_acc_b"] for r in reused], [r["step4_acc_b"] for r in trained])
+        with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):  # otro reparto: se rechaza
+            self.run_experiment("--phase1-checkpoint", str(p1 / "phase1_checkpoint.pt"), "--partition", "dirichlet")
+
+    def test_new_variants_and_post_hoc_corrections(self):
+        results, out = self.run_experiment("--replay-mix", "balanced", "--replay-batch-fraction", "natural",
+                                           "--loss", "ace", "--partition", "dirichlet", "--dirichlet-alpha", "0.5")
+        no_replay, with_replay = results
+        for key in ("wa_w_acc_a", "wa_b_acc_all_100_classes", "mean_logit_b_test_a", "wa_mean_logit_b_test_a"):
+            self.assertIn(key, with_replay)
+        self.assertIn("crt_acc_all_100_classes", with_replay)
+        self.assertNotIn("crt_acc_a", no_replay)  # sin buffer no hay cRT
+        manifest = json.loads((out / "data_manifest.json").read_text())
+        self.assertEqual((manifest["partition"], manifest["dirichlet_alpha"]), ("dirichlet", 0.5))
+        scheduled, _ = self.run_experiment("--replay-mix", "balanced", "--replay-fraction-schedule", "0.25")
+        self.assertEqual(len(scheduled), 2)
+        with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):  # una fracción por ronda
+            self.run_experiment("--replay-mix", "balanced", "--replay-fraction-schedule", "0.25,0.5")
 
     def test_variant_results_do_not_depend_on_order(self):
         first, _ = self.run_experiment()

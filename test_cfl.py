@@ -45,6 +45,10 @@ class CompararTests(unittest.TestCase):
         self.assertIn("--joint", with_joint)
         self.assertNotIn("--joint", without)
 
+    def test_plan_defaults_to_the_gpu_plan(self):
+        args = cfl.build_parser().parse_args(["plan", "--paralelo", "2"])
+        self.assertEqual((args.plan_file, args.paralelo, args.func), ("planes/plan_gpu.json", 2, cfl.cmd_plan))
+
     def test_rejects_missing_no_replay_and_incoherent_checkpoint(self):
         with self.assertRaises(SystemExit):
             commands_of(["comparar", "--buffers", "10", "20", "--dry-run"])

@@ -51,6 +51,16 @@ class FedAvgTests(unittest.TestCase):
         torch.testing.assert_close(aligned["fc.bias"], torch.tensor([1.0, 1.0, 2.0, 2.0]))
         self.assertEqual(state["fc.weight"][2, 0].item(), 3.0)  # el original no cambia
 
+    def test_weight_align_can_scale_only_weights_or_only_bias(self):
+        state = {"fc.weight": torch.tensor([[2.0], [1.0]]), "fc.bias": torch.tensor([0.0, 4.0])}
+        only_w, gamma = fl_core.weight_align(state, [0], [1], scale_bias=False)
+        only_b, _ = fl_core.weight_align(state, [0], [1], scale_weight=False)
+        self.assertAlmostEqual(gamma, 2.0)
+        torch.testing.assert_close(only_w["fc.weight"][1], torch.tensor([2.0]))
+        torch.testing.assert_close(only_w["fc.bias"], state["fc.bias"])
+        torch.testing.assert_close(only_b["fc.weight"], state["fc.weight"])
+        torch.testing.assert_close(only_b["fc.bias"], torch.tensor([0.0, 8.0]))
+
     def test_rejects_invalid_input(self):
         with self.assertRaises(ValueError):
             fl_core.fedavg([])
@@ -150,6 +160,26 @@ class TrainTests(unittest.TestCase):
         logits = torch.randn(5, 10)
         self.assertAlmostEqual(fl_core.distillation_loss(logits, logits, range(5)).item(), 0, places=6)
 
+    def test_ace_new_samples_do_not_push_old_logits(self):
+        logits = torch.randn(4, 6, requires_grad=True)
+        labels = torch.tensor([3, 4, 0, 5])  # clases nuevas 3-5; la muestra 2 es del buffer (clase 0)
+        fl_core.ace_loss(logits, labels, new_classes=[3, 4, 5]).backward()
+        self.assertTrue(torch.all(logits.grad[[0, 1, 3], :3] == 0))  # nuevas: sin gradiente en clases antiguas
+        self.assertTrue(torch.all(logits.grad[2, :3] != 0))         # buffer: entropía cruzada completa
+        plain = torch.nn.functional.cross_entropy(logits.detach()[2:3], labels[2:3])
+        self.assertAlmostEqual(fl_core.ace_loss(logits.detach()[2:3], labels[2:3], [3, 4, 5]).item(), plain.item(), places=6)
+
+    def test_classifier_only_changes_just_the_last_layer(self):
+        torch.manual_seed(0)
+        model = fl_core.get_model(10)
+        before = {k: v.clone() for k, v in model.state_dict().items()}
+        x = torch.randint(0, 256, (16, 3, 8, 8), dtype=torch.uint8)
+        y = torch.randint(0, 10, (16,))
+        after = fl_core.train_local(model, fl_core.concat_batches(x, y, None, None, 8, 1), 1e-2, "cpu",
+                                    fl_core.Preprocess(), classifier_only=True)
+        changed = {k for k in before if not torch.equal(before[k], after[k])}
+        self.assertEqual(changed, {"fc.weight", "fc.bias"})  # BatchNorm tampoco cambia sus estadísticas
+
 
 class ContractTests(unittest.TestCase):
     def test_old_manifest_implies_no_normalization(self):
@@ -157,6 +187,12 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "normalize"):
             validate_training_contract({**old, "normalize": True, "augment": True}, old)
         validate_training_contract({**old, "normalize": False, "augment": False}, old)
+
+    def test_checkpoint_from_another_partition_is_rejected(self):
+        base = {"num_clients": 10, "seed": 42, "dataset_revision": "r", "normalize": True, "augment": True}
+        with self.assertRaisesRegex(ValueError, "partition"):
+            validate_training_contract({**base, "partition": "dirichlet", "dirichlet_alpha": 0.5}, base)
+        validate_training_contract({**base, "partition": "iid"}, base)  # manifiestos antiguos = IID
 
 
 if __name__ == "__main__":

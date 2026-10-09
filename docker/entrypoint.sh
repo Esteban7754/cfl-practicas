@@ -22,7 +22,7 @@ case "${1:-}" in
 esac
 
 case "${1:-ayuda}" in
-    info|entorno|tests|rapido|comparar|semillas)
+    info|entorno|tests|rapido|comparar|semillas|plan)
         exec python "$CFL" "$@" ;;
     ayuda|help|-h|--help)
         exec python "$CFL" --help ;;

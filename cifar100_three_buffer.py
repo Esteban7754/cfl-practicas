@@ -11,10 +11,18 @@ Variantes de replay (combinables):
   --replay-mix balanced   cada lote lleva una proporción fija de muestras del
                           buffer (--replay-batch-fraction, 0.5 por defecto).
   --distill-weight L      añade destilación (LwF) sobre los logits de A.
+  --replay-batch-fraction natural | --replay-fraction-schedule f1,...,fR
+                          fracción del lote igual a la de la mezcla normal, o distinta en cada ronda.
+  --loss ace              ER-ACE: los datos nuevos solo compiten entre clases nuevas.
+  --partition dirichlet --dirichlet-alpha a   reparto desigual por clases entre clientes.
+  --only-phase1 / --phase1-checkpoint         entrenar la fase 1 una vez y reutilizarla.
 
 Referencias y métricas añadidas a cada ejecución:
   Weight Aligning (WA)    corrección posterior del sesgo de la capa final hacia B,
-                          evaluada sobre el mismo modelo (columnas wa_*).
+                          evaluada sobre el mismo modelo (columnas wa_*; solo pesos wa_w_*,
+                          solo sesgo wa_b_*), con las logits medias por grupo (mean_logit_*).
+  cRT                     la capa final reentrenada con el buffer y tantas imágenes de B
+                          (columnas crt_*; --crt-epochs 0 lo desactiva).
   avg_acc_tasks, bwt_a    precisión media por tarea y backward transfer.
   --joint                 cota superior: A y B a la vez desde cero con el mismo
                           presupuesto (joint_results.csv y columnas *_vs_joint).
@@ -76,6 +84,22 @@ def parse_percent(value):
     return percent
 
 
+def parse_fraction(value):
+    if value == "natural":
+        return value
+    fraction = float(value)
+    if not 0 < fraction < 1:
+        raise argparse.ArgumentTypeError("la fracción del lote debe estar entre 0 y 1, o ser 'natural'")
+    return fraction
+
+
+def parse_schedule(value):
+    fractions = [float(v) for v in value.split(",")]
+    if not all(0 <= f < 1 for f in fractions):
+        raise argparse.ArgumentTypeError("cada fracción del calendario debe estar en [0, 1)")
+    return fractions
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     profiles = parser.add_mutually_exclusive_group()
@@ -95,8 +119,25 @@ def build_parser():
                              "--no-controlled-replay recupera el diseño antiguo, en el que más buffer = más pasos")
     parser.add_argument("--replay-mix", choices=["concat", "balanced"], default="concat",
                         help="Cómo se mezclan B y el buffer en cada lote")
-    parser.add_argument("--replay-batch-fraction", type=float, default=0.5,
-                        help="Con --replay-mix balanced: fracción de cada lote que sale del buffer")
+    parser.add_argument("--replay-batch-fraction", type=parse_fraction, default=0.5,
+                        help="Con --replay-mix balanced: fracción de cada lote que sale del buffer, o 'natural' "
+                             "(la misma proporción que en la mezcla normal: buffer / (B + buffer) de cada cliente)")
+    parser.add_argument("--replay-fraction-schedule", type=parse_schedule,
+                        help="Con --replay-mix balanced: fracción por ronda de la fase 2, p. ej. 0.75,0.5,0.25,0.25,0.25")
+    parser.add_argument("--loss", choices=["ce", "ace"], default="ce",
+                        help="Pérdida de la fase 2: ce (entropía cruzada) o ace (ER-ACE: los datos nuevos solo "
+                             "compiten entre clases nuevas)")
+    parser.add_argument("--crt-epochs", type=int, default=2,
+                        help="Épocas del reentrenamiento posterior de la capa final con un conjunto equilibrado "
+                             "(cRT, columnas crt_*); 0 lo desactiva")
+    parser.add_argument("--partition", choices=["iid", "dirichlet"], default="iid",
+                        help="Reparto de los datos entre clientes; dirichlet = desigual por clases")
+    parser.add_argument("--dirichlet-alpha", type=float, default=0.5,
+                        help="Con --partition dirichlet: concentración (menor = clientes con menos clases)")
+    parser.add_argument("--only-phase1", action="store_true",
+                        help="Entrena y guarda la fase 1 (phase1_checkpoint.pt) y termina, para reutilizarla")
+    parser.add_argument("--joint-budget-factor", type=float, default=1.0,
+                        help="Con --joint: presupuesto de la referencia conjunta respecto al de fase 1 + fase 2")
     parser.add_argument("--distill-weight", type=float, default=0.0,
                         help="Peso de la destilación sobre las clases A respecto al modelo de la fase A (0 = sin destilación)")
     parser.add_argument("--joint", action="store_true",
@@ -128,17 +169,29 @@ def resolve_config(args, parser):
     if args.seed is not None:
         config["seed"] = args.seed
     controlled = args.validation or args.controlled_replay
-    if args.replay_mix == "balanced":
-        if not controlled:
-            parser.error("--replay-mix balanced necesita el presupuesto controlado de actualizaciones")
-        if not 0 < args.replay_batch_fraction < 1:
-            parser.error("--replay-batch-fraction debe estar entre 0 y 1")
+    if args.replay_mix == "balanced" and not controlled:
+        parser.error("--replay-mix balanced necesita el presupuesto controlado de actualizaciones")
+    if args.replay_fraction_schedule is not None:
+        if args.replay_mix != "balanced":
+            parser.error("--replay-fraction-schedule solo tiene sentido con --replay-mix balanced")
+        if len(args.replay_fraction_schedule) != config["num_rounds"]:
+            parser.error(f"--replay-fraction-schedule necesita una fracción por ronda ({config['num_rounds']})")
     if args.distill_weight < 0:
         parser.error("--distill-weight no puede ser negativo")
+    if args.only_phase1 and args.phase1_checkpoint:
+        parser.error("--only-phase1 entrena la fase 1; no se combina con --phase1-checkpoint")
+    if args.partition == "dirichlet" and args.dirichlet_alpha <= 0:
+        parser.error("--dirichlet-alpha debe ser positivo")
+    if args.joint_budget_factor <= 0 or args.crt_epochs < 0:
+        parser.error("--joint-budget-factor debe ser positivo y --crt-epochs no negativo")
     config.update(normalize=args.normalize, augment=args.augment, controlled_replay=controlled,
                   replay_mix=args.replay_mix,
                   replay_batch_fraction=args.replay_batch_fraction if args.replay_mix == "balanced" else None,
-                  distill_weight=args.distill_weight, joint_baseline=args.joint)
+                  replay_fraction_schedule=args.replay_fraction_schedule,
+                  distill_weight=args.distill_weight, joint_baseline=args.joint,
+                  joint_budget_factor=args.joint_budget_factor, loss=args.loss, crt_epochs=args.crt_epochs,
+                  partition=args.partition,
+                  dirichlet_alpha=args.dirichlet_alpha if args.partition == "dirichlet" else None)
 
     contract = None
     if args.phase1_checkpoint:
@@ -204,8 +257,14 @@ class Experiment:
         from flwr_datasets import FederatedDataset
 
         cfg = self.config
+        partitioner = cfg["num_clients"]  # IID
+        if cfg["partition"] == "dirichlet":
+            from flwr_datasets.partitioner import DirichletPartitioner
+
+            partitioner = DirichletPartitioner(num_partitions=cfg["num_clients"], partition_by="fine_label",
+                                               alpha=cfg["dirichlet_alpha"], seed=cfg["seed"])
         fds = FederatedDataset(dataset=DATASET, revision=cfg["dataset_revision"],
-                               partitioners={"train": cfg["num_clients"]}, seed=cfg["seed"])
+                               partitioners={"train": partitioner}, seed=cfg["seed"])
         test = fds.load_split("test")
         self.test_a = self.filter_by_classes(test, GROUP_A, cfg.get("test_samples_per_group"))
         self.test_b = self.filter_by_classes(test, GROUP_B, cfg.get("test_samples_per_group"))
@@ -218,7 +277,8 @@ class Experiment:
         manifest = {"clients": [{"client": c, "a_samples": len(self.train_a[c][1]), "b_samples": len(self.train_b[c][1])}
                                 for c in self.train_a],
                     "total_a_samples": sum(len(y) for _, y in self.train_a.values()),
-                    "preprocess": self.preprocess.describe(), "augment": cfg["augment"]}
+                    "preprocess": self.preprocess.describe(), "augment": cfg["augment"],
+                    "partition": cfg["partition"], "dirichlet_alpha": cfg["dirichlet_alpha"]}
         Path("data_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         self.total_a = manifest["total_a_samples"]
         print(f"[DATA] El buffer se calcula sobre {self.total_a} imágenes A en total.")
@@ -230,9 +290,17 @@ class Experiment:
             self.audit["evaluation"].append({"context": dict(self.context), **result})
         return result
 
-    def local_round(self, global_model, batches_for_client, generator, teacher=None, audit=True):
-        weights = []
+    def local_round(self, global_model, batches_for_client, generator, teacher=None, audit=True,
+                    size_of=None, ace=False, classifier_only=False):
+        """Una ronda federada. ``size_of(cliente)`` = muestras que aporta; con 0 no entrena ni se promedia.
+
+        Con reparto IID FedAvg no pondera (clientes iguales, como siempre); con Dirichlet pondera por tamaño.
+        """
+        weights, sizes = [], []
         for client in range(self.config["num_clients"]):
+            size = size_of(client) if size_of else 1
+            if size == 0:
+                continue
             self.context["client"] = client
             local = fl_core.get_model().to(self.device)
             local.load_state_dict(global_model.state_dict())
@@ -240,10 +308,13 @@ class Experiment:
             weights.append(fl_core.train_local(
                 local, batches_for_client(client), self.config["lr"], self.device, self.preprocess,
                 augment=self.config["augment"], generator=generator, teacher=teacher,
-                distill_weight=self.config["distill_weight"], old_classes=GROUP_A, record=record))
+                distill_weight=self.config["distill_weight"], old_classes=GROUP_A, record=record,
+                ace_new_classes=GROUP_B if ace else None, classifier_only=classifier_only))
+            sizes.append(size)
             if record is not None:
                 self.audit["training"].append({"context": dict(self.context), **record})
-        global_model.load_state_dict(fl_core.fedavg(weights))
+        if weights:
+            global_model.load_state_dict(fl_core.fedavg(weights, sizes if self.config["partition"] == "dirichlet" else None))
 
     def phase1(self):
         cfg, args = self.config, self.args
@@ -261,7 +332,7 @@ class Experiment:
                     x, y = self.train_a[client]
                     return fl_core.concat_batches(x, y, None, None, cfg["batch_size"], cfg["local_epochs"], generator=generator)
 
-                self.local_round(model, batches, generator)
+                self.local_round(model, batches, generator, size_of=lambda c: len(self.train_a[c][1]))
                 acc = self.evaluate(model, *self.test_a)["accuracy_percent"]
                 print(f"Fase 1 - Ronda {r + 1}/{cfg['num_rounds']} -> Precisión A: {acc:.2f}%")
         self.context = {"phase": 1, "final": True}
@@ -274,7 +345,7 @@ class Experiment:
             self.save_status()
             self.save_audit()
             raise RuntimeError(self.status["reason"])
-        if not args.phase1_checkpoint and not args.quick:
+        if not args.phase1_checkpoint and (not args.quick or args.only_phase1):
             self.save_phase1_checkpoint(model)
         if args.audit:
             torch.save(self.base_weights, "audit_phase1.pt")
@@ -285,7 +356,7 @@ class Experiment:
         """Guarda los pesos A con su manifiesto, para poder reutilizarlos con trazabilidad."""
         torch.save(model.state_dict(), "phase1_checkpoint.pt")
         keys = ("num_clients", "batch_size", "local_epochs", "num_rounds", "lr", "seed", "dataset_revision",
-                "train_samples_per_group", "sampling", "normalize", "augment")
+                "train_samples_per_group", "sampling", "normalize", "augment", "partition", "dirichlet_alpha")
         manifest = {key: self.config.get(key) for key in keys}
         manifest.update(group_a_classes=GROUP_A,
                         checkpoint_sha256=hashlib.sha256(Path("phase1_checkpoint.pt").read_bytes()).hexdigest(),
@@ -308,6 +379,69 @@ class Experiment:
             idx = torch.as_tensor(indices)
             buffers[client] = (x[idx], y[idx])
         return buffers
+
+    def batch_fraction(self, client, round_index, buffers):
+        """Fracción de cada lote que sale del buffer en una ronda de la fase 2 (lotes equilibrados)."""
+        cfg = self.config
+        if cfg["replay_fraction_schedule"]:
+            return cfg["replay_fraction_schedule"][round_index]
+        if cfg["replay_batch_fraction"] == "natural":  # la proporción que tendría la mezcla normal
+            new, old = len(self.train_b[client][1]), len(buffers[client][1])
+            return old / (new + old)
+        return cfg["replay_batch_fraction"]
+
+    def post_hoc(self, model, buffers, percent):
+        """Correcciones posteriores del clasificador sobre el modelo final; no cambian el entrenamiento.
+
+        WA completo, solo pesos y solo sesgo, y cRT: la capa final se vuelve a entrenar
+        (resto congelado) con el buffer y el mismo número de imágenes de B en cada cliente.
+        """
+        cfg, out = self.config, {}
+
+        def scores(state):
+            probe = fl_core.get_model().to(self.device)
+            probe.load_state_dict(state)
+            a = fl_core.evaluate(probe, *self.test_a, self.device, self.preprocess, group_a_classes=GROUP_A)
+            b = fl_core.evaluate(probe, *self.test_b, self.device, self.preprocess)
+            return a, b
+
+        def summary(prefix, a, b):
+            out[f"{prefix}acc_a"] = a["accuracy_percent"]
+            out[f"{prefix}acc_b"] = b["accuracy_percent"]
+            out[f"{prefix}acc_all_100_classes"] = (a["correct"] + b["correct"]) * 100 / (a["total"] + b["total"])
+            out[f"{prefix}mean_logit_a_test_a"] = a["mean_logit_a"]
+            out[f"{prefix}mean_logit_b_test_a"] = a["mean_logit_b"]
+
+        state = model.state_dict()
+        for prefix, weight, bias in (("wa_", True, True), ("wa_w_", True, False), ("wa_b_", False, True)):
+            aligned, gamma = fl_core.weight_align(state, GROUP_A, GROUP_B, scale_weight=weight, scale_bias=bias)
+            a, b = scores(aligned)
+            summary(prefix, a, b)
+            if prefix == "wa_":
+                out["wa_gamma"], wa_a = gamma, a
+        print(f"[WA] gamma = {out['wa_gamma']:.3f} -> A: {out['wa_acc_a']:.2f}% | B: {out['wa_acc_b']:.2f}%")
+
+        if percent > 0 and cfg["crt_epochs"] > 0:
+            crt = fl_core.get_model().to(self.device)
+            crt.load_state_dict(state)
+            generator = torch.Generator().manual_seed(cfg["seed"] + 3)
+
+            def balanced_set(client):
+                (bx, by), buf = self.train_b[client], buffers[client]
+                if buf is None or len(by) == 0:
+                    return None
+                idx = torch.randperm(len(by), generator=generator)[:len(buf[1])]
+                return torch.cat([buf[0], bx[idx]]), torch.cat([buf[1], by[idx]])
+
+            sets = {c: balanced_set(c) for c in range(cfg["num_clients"])}
+            self.local_round(crt, lambda c: fl_core.concat_batches(*sets[c], None, None, cfg["batch_size"],
+                                                                   cfg["crt_epochs"], generator=generator),
+                             generator, audit=False, size_of=lambda c: 0 if sets[c] is None else len(sets[c][1]),
+                             classifier_only=True)
+            a, b = scores(crt.state_dict())
+            summary("crt_", a, b)
+            print(f"[cRT] A: {out['crt_acc_a']:.2f}% | B: {out['crt_acc_b']:.2f}%")
+        return out, wa_a
 
     def phase2(self, percent):
         cfg = self.config
@@ -345,11 +479,12 @@ class Experiment:
                 steps = fl_core.steps_per_epoch(len(by), cfg["batch_size"]) * cfg["local_epochs"] if cfg["controlled_replay"] else None
                 if cfg["replay_mix"] == "balanced" and buf is not None:
                     return fl_core.mixed_batches(bx, by, buf[0], buf[1], cfg["batch_size"], steps,
-                                                 cfg["replay_batch_fraction"], generator)
+                                                 self.batch_fraction(client, r, buffers), generator)
                 return fl_core.concat_batches(bx, by, buf[0] if buf else None, buf[1] if buf else None,
                                               cfg["batch_size"], cfg["local_epochs"], max_steps=steps, generator=generator)
 
-            self.local_round(model, batches, generator, teacher)
+            self.local_round(model, batches, generator, teacher, size_of=lambda c: len(self.train_b[c][1]),
+                             ace=cfg["loss"] == "ace")
             acc_a = self.evaluate(model, *self.test_a)["accuracy_percent"]
             acc_b = self.evaluate(model, *self.test_b)["accuracy_percent"]
             print(f"Fase 2 - Ronda {r + 1}/{cfg['num_rounds']} -> A: {acc_a:.2f}% | B: {acc_b:.2f}%")
@@ -377,14 +512,9 @@ class Experiment:
                 extra["train_acc_replay"] = fl_core.evaluate(model, xs, ys, self.device, self.preprocess)["accuracy_percent"]
             print(f"[CONTROL] B en entrenamiento: {extra['train_acc_b']:.2f}%; replay: {extra['train_acc_replay']}")
 
-        # Weight Aligning: el mismo modelo con la capa final corregida (no cambia el entrenamiento).
-        wa_state, wa_gamma = fl_core.weight_align(model.state_dict(), GROUP_A, GROUP_B)
-        wa_model = fl_core.get_model().to(self.device)
-        wa_model.load_state_dict(wa_state)
-        wa_a = fl_core.evaluate(wa_model, *self.test_a, self.device, self.preprocess, group_a_classes=GROUP_A)
-        wa_b = fl_core.evaluate(wa_model, *self.test_b, self.device, self.preprocess)
-        print(f"[WA] gamma = {wa_gamma:.3f} -> A: {wa_a['accuracy_percent']:.2f}% | B: {wa_b['accuracy_percent']:.2f}%")
-        del teacher, wa_model
+        # Correcciones posteriores del clasificador (WA y variantes, cRT): no cambian el entrenamiento.
+        post, wa_a = self.post_hoc(model, buffers, percent)
+        del teacher
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -407,13 +537,14 @@ class Experiment:
             # Métricas estándar de aprendizaje continuo (2 tareas): media por tarea y backward transfer.
             "avg_acc_tasks": (acc_a + acc_b) / 2,
             "bwt_a": acc_a - self.base_acc_a,
-            "wa_gamma": wa_gamma,
-            "wa_acc_a": wa_a["accuracy_percent"],
-            "wa_acc_b": wa_b["accuracy_percent"],
-            "wa_acc_all_100_classes": (wa_a["correct"] + wa_b["correct"]) * 100 / (n_a + n_b),
-            "wa_retention_a_percent": fl_core.retention_percent(self.base_acc_a, wa_a["accuracy_percent"]),
-            "wa_avg_acc_tasks": (wa_a["accuracy_percent"] + wa_b["accuracy_percent"]) / 2,
-            "wa_bwt_a": wa_a["accuracy_percent"] - self.base_acc_a,
+            "mean_logit_a_test_a": final_a["mean_logit_a"],
+            "mean_logit_b_test_a": final_a["mean_logit_b"],
+            **post,
+            "wa_retention_a_percent": fl_core.retention_percent(self.base_acc_a, post["wa_acc_a"]),
+            "wa_avg_acc_tasks": (post["wa_acc_a"] + post["wa_acc_b"]) / 2,
+            "wa_bwt_a": post["wa_acc_a"] - self.base_acc_a,
+            **({"crt_retention_a_percent": fl_core.retention_percent(self.base_acc_a, post["crt_acc_a"])}
+               if "crt_acc_a" in post else {}),
             **extra,
         }
 
@@ -426,8 +557,9 @@ class Experiment:
         """
         cfg = self.config
         seed_everything(cfg["seed"])
-        rounds = 2 * cfg["num_rounds"]
-        print(f"\n=== COTA SUPERIOR: ENTRENAMIENTO CONJUNTO A+B ({rounds} rondas, mismo presupuesto) ===")
+        rounds = max(1, round(2 * cfg["num_rounds"] * cfg["joint_budget_factor"]))
+        print(f"\n=== REFERENCIA: ENTRENAMIENTO CONJUNTO A+B ({rounds} rondas, "
+              f"{cfg['joint_budget_factor']:g} x el presupuesto de fase 1 + fase 2) ===")
         model = fl_core.get_model().to(self.device)
         generator = torch.Generator().manual_seed(cfg["seed"] + 2)
         for r in range(rounds):
@@ -440,14 +572,16 @@ class Experiment:
                 return fl_core.concat_batches(ax, ay, bx, by, cfg["batch_size"], cfg["local_epochs"],
                                               max_steps=steps, generator=generator)
 
-            self.local_round(model, batches, generator, audit=False)
+            self.local_round(model, batches, generator, audit=False,
+                             size_of=lambda c: len(self.train_a[c][1]) + len(self.train_b[c][1]))
             acc_a = fl_core.evaluate(model, *self.test_a, self.device, self.preprocess)["accuracy_percent"]
             acc_b = fl_core.evaluate(model, *self.test_b, self.device, self.preprocess)["accuracy_percent"]
             print(f"Conjunto - Ronda {r + 1}/{rounds} -> A: {acc_a:.2f}% | B: {acc_b:.2f}%")
         final_a = fl_core.evaluate(model, *self.test_a, self.device, self.preprocess, group_a_classes=GROUP_A)
         final_b = fl_core.evaluate(model, *self.test_b, self.device, self.preprocess)
         acc_a, acc_b = final_a["accuracy_percent"], final_b["accuracy_percent"]
-        return {"fraction": "Conjunto A+B", "rounds": rounds, "acc_a": acc_a, "acc_b": acc_b,
+        return {"fraction": "Conjunto A+B", "rounds": rounds, "budget_factor": cfg["joint_budget_factor"],
+                "acc_a": acc_a, "acc_b": acc_b,
                 "acc_all_100_classes": (final_a["correct"] + final_b["correct"]) * 100 / (final_a["total"] + final_b["total"]),
                 "avg_acc_tasks": (acc_a + acc_b) / 2}
 
@@ -457,6 +591,11 @@ class Experiment:
         self.save_status()
         self.load_data()
         self.phase1()
+        if args.only_phase1:
+            self.status["reason"] = "Solo fase 1: phase1_checkpoint.pt guardado para reutilizarlo"
+            self.save_status()
+            print("[INFO] Fase 1 guardada en phase1_checkpoint.pt; no se ejecuta la fase 2.")
+            return []
         results = []
         for percent in args.buffers:
             result = self.phase2(percent)

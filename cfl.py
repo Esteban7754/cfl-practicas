@@ -181,6 +181,19 @@ def cmd_semillas(args):
     return 0
 
 
+def cmd_plan(args):
+    command = [sys.executable, "plan_experimentos.py", args.plan_file]
+    if args.dry_run:
+        command.append("--dry-run")
+    if args.solo_informe:
+        command.append("--solo-informe")
+    if args.paralelo:
+        command += ["--paralelo", str(args.paralelo)]
+    print(f"\n$ {' '.join(command)}", flush=True)
+    # Sin capturar la salida: el plan informa del progreso y un Ctrl+C le llega directamente.
+    return subprocess.run(command, cwd=ROOT, env=child_env()).returncode
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="cfl", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -221,6 +234,13 @@ def build_parser():
     semillas.add_argument("--seeds", nargs="+", type=int, default=[42, 43, 44])
     semillas.set_defaults(func=cmd_semillas, extra=[])  # el resto de argumentos se pasa al script
     semillas.epilog = "Los argumentos que cfl no reconoce se pasan al script: cfl semillas domainnet.py --buffers 0 20"
+
+    plan = sub.add_parser("plan", help="Ejecuta un plan de experimentos completo (planes/*.json), reanudable, con informe")
+    plan.add_argument("plan_file", nargs="?", default="planes/plan_gpu.json")
+    plan.add_argument("--dry-run", action="store_true", help="Lista las tareas pendientes y sus comandos")
+    plan.add_argument("--solo-informe", action="store_true", help="Solo agrega e informa con lo que ya haya")
+    plan.add_argument("--paralelo", type=int, help="Tareas simultáneas (por defecto, las del plan)")
+    plan.set_defaults(func=cmd_plan)
     return parser
 
 

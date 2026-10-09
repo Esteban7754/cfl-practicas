@@ -11,6 +11,8 @@ CONTRACT_DEFAULTS = {
     "sampling": None,
     "normalize": False,
     "augment": False,
+    "partition": "iid",
+    "dirichlet_alpha": None,
 }
 
 
