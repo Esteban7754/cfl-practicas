@@ -6,6 +6,9 @@
     .\lanzar_gpu.ps1 -SoloPlan          salta la construcción y los tests (p. ej. para reanudar)
     .\lanzar_gpu.ps1 -Simular           muestra las tareas pendientes del plan sin ejecutarlas
     .\lanzar_gpu.ps1 -Plan planes\otro.json -Paralelo 2
+    .\lanzar_gpu.ps1 -Hasta 23:00       a partir de las 23:00 no empieza tareas nuevas, deja terminar
+                                        las que están en curso y se para solo (informe parcial incluido)
+    .\lanzar_gpu.ps1 -SoloPlan -Horas 5 igual, pero tras 5 horas; al relanzar sigue con lo pendiente
 
     El plan es reanudable: si se corta (Ctrl+C, apagado, error), vuelve a lanzar el mismo
     comando y sigue donde se quedó. Un solo Ctrl+C detiene todas las tareas en curso.
@@ -15,6 +18,8 @@
 param(
     [string]$Plan = "planes/plan_gpu.json",
     [int]$Paralelo = 0,
+    [string]$Hasta = "",
+    [double]$Horas = 0,
     [switch]$SoloPlan,
     [switch]$Simular
 )
@@ -62,6 +67,11 @@ Paso "4/4 Ejecutando el plan $Plan"
 $planArgs = @("plan", $Plan)
 if ($Simular) { $planArgs += "--dry-run" }
 if ($Paralelo -gt 0) { $planArgs += @("--paralelo", "$Paralelo") }
+if ($Hasta) {
+    if ($Hasta -notmatch '^\d{1,2}:\d{2}$') { Fallo "-Hasta necesita una hora con formato HH:MM, por ejemplo 23:30." }
+    $planArgs += @("--hasta", $Hasta)
+}
+if ($Horas -gt 0) { $planArgs += @("--horas", ([string]$Horas).Replace(",", ".")) }
 & $run -gpu @planArgs
 $code = $LASTEXITCODE
 [void][Cfl.Power]::SetThreadExecutionState([uint32]"0x80000000")   # vuelve al comportamiento normal
@@ -69,6 +79,10 @@ $code = $LASTEXITCODE
 if ($Simular) { exit $code }
 if ($code -eq 0) {
     Write-Host "`nPlan terminado. Informe: resultados\plan_gpu\INFORME.md" -ForegroundColor Green
+} elseif ($code -eq 3) {
+    Write-Host "`nPausa por el límite de tiempo: lo terminado está guardado y el informe parcial en resultados\plan_gpu\INFORME.md." -ForegroundColor Cyan
+    Write-Host "Para continuar otro día: .\lanzar_gpu.ps1 -SoloPlan  (puedes volver a poner -Hasta o -Horas)" -ForegroundColor Cyan
+    exit 0
 } else {
     Write-Host "`nEl plan terminó con problemas (código $code). Mira resultados\plan_gpu\INFORME.md y _registros\." -ForegroundColor Yellow
     Write-Host "Para reanudar lo que falte: .\lanzar_gpu.ps1 -SoloPlan" -ForegroundColor Yellow

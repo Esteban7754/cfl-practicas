@@ -189,6 +189,10 @@ def cmd_plan(args):
         command.append("--solo-informe")
     if args.paralelo:
         command += ["--paralelo", str(args.paralelo)]
+    if args.hasta:
+        command += ["--hasta", args.hasta]
+    if args.horas is not None:
+        command += ["--horas", str(args.horas)]
     print(f"\n$ {' '.join(command)}", flush=True)
     # Sin capturar la salida: el plan informa del progreso y un Ctrl+C le llega directamente.
     return subprocess.run(command, cwd=ROOT, env=child_env()).returncode
@@ -240,6 +244,8 @@ def build_parser():
     plan.add_argument("--dry-run", action="store_true", help="Lista las tareas pendientes y sus comandos")
     plan.add_argument("--solo-informe", action="store_true", help="Solo agrega e informa con lo que ya haya")
     plan.add_argument("--paralelo", type=int, help="Tareas simultáneas (por defecto, las del plan)")
+    plan.add_argument("--hasta", help="HH:MM: a partir de esa hora no empieza tareas nuevas y se para al acabar las en curso")
+    plan.add_argument("--horas", type=float, help="Igual, pero tras N horas desde que arranca")
     plan.set_defaults(func=cmd_plan)
     return parser
 

@@ -10,6 +10,9 @@
 - Es reanudable: una tarea con su results.csv (o su phase1_checkpoint.pt) ya está hecha y se
   salta; una carpeta a medias se aparta como ``*_incompleta_<fecha>`` y se repite.
 - Un solo Ctrl+C (o la parada del contenedor) detiene todas las tareas en curso.
+- ``--hasta HH:MM`` o ``--horas N``: a partir de ese momento no empieza tareas nuevas, deja
+  terminar las que están en curso, escribe el informe parcial y se para (código 3). Al relanzar,
+  sigue con lo pendiente. Así el plan se reparte en varias tandas sin perder nada.
 - Al terminar agrega las semillas de cada trabajo (agregar_semillas.py) y escribe el informe
   (informe_plan.py): resultados/<plan>/INFORME.md con tablas y gráficas.
 """
@@ -21,7 +24,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -54,6 +57,37 @@ def is_done(task):
 
 def command(task):
     return [sys.executable, "cifar100_three_buffer.py", *task["args"], "--output-dir", str(task["dir"])]
+
+
+PAUSED = 3  # código de salida cuando se para por el límite de tiempo con tareas pendientes
+
+
+def deadline_from(hasta=None, horas=None, now=None):
+    """Momento (epoch) a partir del cual no se empiezan tareas nuevas; None = sin límite.
+
+    ``hasta`` = "HH:MM" del reloj local; si esa hora ya pasó hoy, es la de mañana.
+    """
+    now = now or datetime.now()
+    limits = []
+    if horas is not None:
+        limits.append(now.timestamp() + horas * 3600)
+    if hasta:
+        hour, minute = (int(v) for v in hasta.split(":"))
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        limits.append(target.timestamp())
+    return min(limits) if limits else None
+
+
+def parse_clock(value):
+    try:
+        hour, minute = (int(v) for v in value.split(":"))
+        if 0 <= hour < 24 and 0 <= minute < 60:
+            return f"{hour:02d}:{minute:02d}"
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("usa el formato HH:MM, por ejemplo 23:30")
 
 
 def gpu_count():
@@ -96,9 +130,13 @@ def run_plan(plan, args):
     running = {}
     start = time.time()
     gpus = gpu_count() if "CUDA_VISIBLE_DEVICES" not in os.environ else 0
+    deadline = deadline_from(getattr(args, "hasta", None), getattr(args, "horas", None))
     print(f"[PLAN] {plan['nombre']}: {len(pending)} tareas pendientes de {len(tasks)}; {parallel} en paralelo, "
           f"{threads} hilos de CPU cada una{f', repartidas entre {gpus} GPU' if gpus > 1 else ''}. "
           f"Resultados en {plan['salida']}", flush=True)
+    if deadline is not None:
+        print(f"[PLAN] No se empezarán tareas nuevas a partir de las "
+              f"{datetime.fromtimestamp(deadline):%H:%M del %d/%m}; las que estén en curso terminarán.", flush=True)
 
     def stop_all(*_):
         print("\n[PLAN] Deteniendo todas las tareas en curso...", flush=True)
@@ -115,15 +153,29 @@ def run_plan(plan, args):
 
     previous = signal.signal(signal.SIGINT, stop_all), signal.signal(signal.SIGTERM, stop_all)
     try:
-        return schedule(pending, running, status, tasks, parallel, env, logs, out, start, args, gpus)
+        return schedule(pending, running, status, tasks, parallel, env, logs, out, start, args, gpus, deadline)
     finally:
         signal.signal(signal.SIGINT, previous[0])
         signal.signal(signal.SIGTERM, previous[1])
 
 
-def schedule(pending, running, status, tasks, parallel, env, logs, out, start, args, gpus=0):
-    next_report = 0.0
+def schedule(pending, running, status, tasks, parallel, env, logs, out, start, args, gpus=0, deadline=None):
+    next_report, announced = 0.0, False
     while pending or running:
+        if deadline is not None and time.time() >= deadline and pending:
+            if not running:
+                (out / "estado.json").write_text(json.dumps(status, indent=1, ensure_ascii=False), encoding="utf-8")
+                print(f"\n[PLAN] Pausa: alcanzado el límite de tiempo tras {(time.time() - start) / 3600:.2f} h. "
+                      f"Hechas {sum(s == 'hecha' for s in status.values())} de {len(tasks)}; quedan {len(pending)}. "
+                      "Vuelve a lanzar el mismo comando para continuar.", flush=True)
+                return PAUSED
+            if not announced:
+                print(f"[PLAN] Límite de tiempo alcanzado: no se empiezan tareas nuevas; esperando a las "
+                      f"{len(running)} en curso.", flush=True)
+                announced = True
+            pending_view = []  # no se lanza nada; solo se recogen las que terminan
+        else:
+            pending_view = pending
         for tid, (proc, task, handle) in list(running.items()):
             if proc.poll() is not None:
                 handle.close()
@@ -132,7 +184,7 @@ def schedule(pending, running, status, tasks, parallel, env, logs, out, start, a
                 status[tid] = "hecha" if ok else "fallida"
                 print(f"[PLAN] {'OK    ' if ok else 'FALLO '} {tid} ({(time.time() - start) / 3600:.2f} h)"
                       + ("" if ok else f" -> {logs / (tid + '.log')}"), flush=True)
-        for task in list(pending):
+        for task in list(pending_view):
             if len(running) >= parallel:
                 break
             deps = [status[d] for d in task["deps"]]
@@ -192,6 +244,8 @@ def main(argv=None):
     parser.add_argument("--solo-informe", action="store_true", help="Solo agrega e informa con lo que ya haya")
     parser.add_argument("--paralelo", type=int, help="Tareas simultáneas (por defecto, las del plan)")
     parser.add_argument("--informe-cada", type=float, default=10, help="Minutos entre informes de progreso")
+    parser.add_argument("--hasta", type=parse_clock, help="Hora (HH:MM) a partir de la cual no se empiezan tareas nuevas")
+    parser.add_argument("--horas", type=float, help="Horas a partir de las cuales no se empiezan tareas nuevas")
     args = parser.parse_args(argv)
     plan = json.loads((ROOT / args.plan).read_text(encoding="utf-8"))
     code = 0 if args.solo_informe else run_plan(plan, args)

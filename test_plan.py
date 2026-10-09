@@ -6,6 +6,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -63,6 +64,30 @@ class RunTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(all(s == "hecha" for s in status.values()))
             self.assertTrue(list((ROOT / out / "_fase1").glob("dir_seed42_incompleta_*")))
+
+
+class DeadlineTests(unittest.TestCase):
+    def test_clock_time_in_the_past_means_tomorrow(self):
+        now = datetime(2026, 10, 12, 18, 0)
+        self.assertEqual(datetime.fromtimestamp(plan_experimentos.deadline_from("23:30", now=now)), datetime(2026, 10, 12, 23, 30))
+        self.assertEqual(datetime.fromtimestamp(plan_experimentos.deadline_from("02:00", now=now)), datetime(2026, 10, 13, 2, 0))
+        both = plan_experimentos.deadline_from("23:30", horas=1, now=now)  # manda el límite más cercano
+        self.assertEqual(datetime.fromtimestamp(both), datetime(2026, 10, 12, 19, 0))
+        self.assertIsNone(plan_experimentos.deadline_from())
+
+    def test_pauses_without_losing_work_and_resumes(self):
+        ok = "import sys, pathlib; p = pathlib.Path(sys.argv[1]); p.mkdir(parents=True, exist_ok=True); (p / sys.argv[2]).write_text('x')"
+        plan = make_plan(None)
+        fake = lambda task: [sys.executable, "-c", ok, str(ROOT / task["dir"]), task["done"], task["id"]]
+        with tempfile.TemporaryDirectory(dir=ROOT / "resultados") as tmp, \
+                mock.patch.object(plan_experimentos, "command", fake), mock.patch.object(plan_experimentos.time, "sleep"):
+            plan["salida"] = str(Path(tmp).relative_to(ROOT))
+            paused = argparse.Namespace(dry_run=False, paralelo=None, informe_cada=60, hasta=None, horas=0)
+            self.assertEqual(plan_experimentos.run_plan(plan, paused), plan_experimentos.PAUSED)
+            status = json.loads((Path(tmp) / "estado.json").read_text())
+            self.assertTrue(all(s == "pendiente" for s in status.values()))  # no empezó nada
+            resumed = argparse.Namespace(dry_run=False, paralelo=None, informe_cada=60, hasta=None, horas=None)
+            self.assertEqual(plan_experimentos.run_plan(plan, resumed), 0)
 
 
 class GpuTests(unittest.TestCase):
