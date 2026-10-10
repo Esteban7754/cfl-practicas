@@ -13,7 +13,8 @@ Variantes de replay (combinables):
   --distill-weight L      añade destilación (LwF) sobre los logits de A.
   --replay-batch-fraction natural | --replay-fraction-schedule f1,...,fR
                           fracción del lote igual a la de la mezcla normal, o distinta en cada ronda.
-  --loss ace              ER-ACE: los datos nuevos solo compiten entre clases nuevas.
+  --loss ace              ER-ACE: los datos nuevos solo compiten entre clases nuevas; la memoria
+                          de replay lleva el buffer A y otras tantas imágenes B (sin buffer, CE).
   --partition dirichlet --dirichlet-alpha a   reparto desigual por clases entre clientes.
   --only-phase1 / --phase1-checkpoint         entrenar la fase 1 una vez y reutilizarla.
 
@@ -126,7 +127,7 @@ def build_parser():
                         help="Con --replay-mix balanced: fracción por ronda de la fase 2, p. ej. 0.75,0.5,0.25,0.25,0.25")
     parser.add_argument("--loss", choices=["ce", "ace"], default="ce",
                         help="Pérdida de la fase 2: ce (entropía cruzada) o ace (ER-ACE: los datos nuevos solo "
-                             "compiten entre clases nuevas)")
+                             "compiten entre clases nuevas; la memoria lleva el buffer A y otras tantas imágenes B)")
     parser.add_argument("--crt-epochs", type=int, default=2,
                         help="Épocas del reentrenamiento posterior de la capa final con un conjunto equilibrado "
                              "(cRT, columnas crt_*); 0 lo desactiva")
@@ -171,6 +172,8 @@ def resolve_config(args, parser):
     controlled = args.validation or args.controlled_replay
     if args.replay_mix == "balanced" and not controlled:
         parser.error("--replay-mix balanced necesita el presupuesto controlado de actualizaciones")
+    if args.loss == "ace" and args.replay_mix != "balanced":
+        parser.error("--loss ace necesita --replay-mix balanced (la memoria de ER-ACE va en cada lote)")
     if args.replay_fraction_schedule is not None:
         if args.replay_mix != "balanced":
             parser.error("--replay-fraction-schedule solo tiene sentido con --replay-mix balanced")
@@ -390,6 +393,23 @@ class Experiment:
             return old / (new + old)
         return cfg["replay_batch_fraction"]
 
+    def ace_memory(self, buffers):
+        """Memoria de ER-ACE por cliente: el buffer A más el mismo número de imágenes B, equilibradas por clase.
+
+        En ER-ACE la memoria se llena con todo el flujo, así que también guarda la tarea actual; con
+        solo imágenes A, nada empuja las clases B por encima de las A y B se queda en 0 %.
+        Las imágenes B ya están en el cliente: no cuesta memoria extra de la tarea antigua.
+        """
+        memory = {}
+        for client, buf in buffers.items():
+            bx, by = self.train_b[client]
+            if buf is None or len(by) == 0:
+                memory[client] = buf
+                continue
+            idx = torch.as_tensor(balanced_order(by.tolist(), self.config["seed"] + 7 + client)[:len(buf[1])])
+            memory[client] = torch.cat([buf[0], bx[idx]]), torch.cat([buf[1], by[idx]])
+        return memory
+
     def post_hoc(self, model, buffers, percent):
         """Correcciones posteriores del clasificador sobre el modelo final; no cambian el entrenamiento.
 
@@ -469,6 +489,8 @@ class Experiment:
                             "buffer_samples": len(b[1]) if b is not None else 0} for c, b in buffers.items()]}
         print(f"[REPLAY] Memoria real: {replay_total}/{self.total_a} imágenes A.")
 
+        ace = cfg["loss"] == "ace" and percent > 0  # sin memoria, ER-ACE no tiene replay que lo equilibre
+        ace_memory = self.ace_memory(buffers) if ace else None
         generator = torch.Generator().manual_seed(cfg["seed"] + 1)
         for r in range(cfg["num_rounds"]):
             self.context = {"phase": 2, "replay_fraction": percent / 100, "round": r + 1}
@@ -478,13 +500,15 @@ class Experiment:
                 buf = buffers[client]
                 steps = fl_core.steps_per_epoch(len(by), cfg["batch_size"]) * cfg["local_epochs"] if cfg["controlled_replay"] else None
                 if cfg["replay_mix"] == "balanced" and buf is not None:
+                    if ace:  # memoria de ER-ACE: buffer A + tantas imágenes B como tiene el buffer
+                        return fl_core.mixed_batches(bx, by, *ace_memory[client], cfg["batch_size"], steps,
+                                                     self.batch_fraction(client, r, buffers), generator, with_origin=True)
                     return fl_core.mixed_batches(bx, by, buf[0], buf[1], cfg["batch_size"], steps,
                                                  self.batch_fraction(client, r, buffers), generator)
                 return fl_core.concat_batches(bx, by, buf[0] if buf else None, buf[1] if buf else None,
                                               cfg["batch_size"], cfg["local_epochs"], max_steps=steps, generator=generator)
 
-            self.local_round(model, batches, generator, teacher, size_of=lambda c: len(self.train_b[c][1]),
-                             ace=cfg["loss"] == "ace")
+            self.local_round(model, batches, generator, teacher, size_of=lambda c: len(self.train_b[c][1]), ace=ace)
             acc_a = self.evaluate(model, *self.test_a)["accuracy_percent"]
             acc_b = self.evaluate(model, *self.test_b)["accuracy_percent"]
             print(f"Fase 2 - Ronda {r + 1}/{cfg['num_rounds']} -> A: {acc_a:.2f}% | B: {acc_b:.2f}%")

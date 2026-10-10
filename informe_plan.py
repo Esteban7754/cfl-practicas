@@ -217,7 +217,9 @@ def main(plan_path):
     settings = [s for s in settings if s[1] in data or s[2] in data]
     if len(settings) >= 2:
         md += ["## 6. Datos desiguales entre clientes (Dirichlet)", "",
-               "Menor α = cada cliente tiene menos clases. ¿Siguen ganando los lotes equilibrados cuando los buffers locales están desequilibrados?", ""]
+               "Menor α = cada cliente tiene menos clases. ¿Siguen ganando los lotes equilibrados cuando los buffers locales están desequilibrados? "
+               "Con α pequeño la fase 1 queda débil y A puede seguir mejorando en la fase 2, así que la retención "
+               "puede pasar del 100 %: aquí conviene comparar las precisiones absolutas (100 clases).", ""]
         rows = []
         for name, normal, balanced in settings:
             for label, jid in (("normal", normal), ("equilibrados", balanced)):

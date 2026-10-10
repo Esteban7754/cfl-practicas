@@ -155,6 +155,8 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(scheduled), 2)
         with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):  # una fracción por ronda
             self.run_experiment("--replay-mix", "balanced", "--replay-fraction-schedule", "0.25,0.5")
+        with self.assertRaises(SystemExit), mock.patch.object(sys, "stderr"):  # ER-ACE necesita lotes equilibrados
+            self.run_experiment("--loss", "ace")
 
     def test_variant_results_do_not_depend_on_order(self):
         first, _ = self.run_experiment()

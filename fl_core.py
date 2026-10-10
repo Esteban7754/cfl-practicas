@@ -187,13 +187,14 @@ def concat_batches(new_x, new_y, buffer_x, buffer_y, batch_size, epochs, max_ste
 
 
 def mixed_batches(new_x, new_y, buffer_x, buffer_y, batch_size, steps, replay_fraction,
-                  generator=None) -> Iterator:
+                  generator=None, with_origin=False) -> Iterator:
     """Lotes con una proporción fija de muestras del buffer.
 
     En cada lote, ``round(batch_size * replay_fraction)`` muestras salen del
     buffer (con reposición, porque suele ser más pequeño) y el resto de los
     datos nuevos, recorridos por épocas barajadas. Así se separa el *tamaño*
     del buffer de la *proporción* de replay en cada actualización.
+    ``with_origin``: cada lote lleva además la máscara de muestras entrantes (para ER-ACE).
     """
     if not 0 <= replay_fraction < 1:
         raise ValueError("replay_fraction debe estar en [0, 1)")
@@ -211,7 +212,10 @@ def mixed_batches(new_x, new_y, buffer_x, buffer_y, batch_size, steps, replay_fr
         if n_old:
             idx_old = torch.randint(0, len(buffer_y), (n_old,), generator=generator)
             xb, yb = torch.cat([xb, buffer_x[idx_old]]), torch.cat([yb, buffer_y[idx_old]])
-        yield xb, yb
+        if with_origin:
+            yield xb, yb, torch.arange(len(yb)) < n_new
+        else:
+            yield xb, yb
 
 
 def balanced_buffer_order(labels, seed: int):
@@ -232,16 +236,19 @@ def distillation_loss(student_logits, teacher_logits, old_classes: Sequence[int]
     return F.kl_div(s, t, reduction="batchmean") * temperature ** 2
 
 
-def ace_loss(logits, labels, new_classes: Sequence[int]):
+def ace_loss(logits, labels, new_classes: Sequence[int], incoming=None):
     """Entropía cruzada asimétrica de ER-ACE (Caccia et al., ICLR 2022).
 
-    Las muestras de clases nuevas solo compiten entre clases nuevas (las logits
-    del resto se enmascaran); las del buffer usan la entropía cruzada completa.
-    Así el gradiente de los datos nuevos no empuja hacia abajo las clases antiguas.
+    Las muestras entrantes solo compiten entre clases nuevas (las logits del
+    resto se enmascaran); las que salen de la memoria usan la entropía cruzada
+    completa. ``incoming`` marca qué muestras son entrantes; sin él se deduce de
+    la etiqueta. Como en el original, la memoria debe incluir también muestras
+    de la tarea actual: si solo tiene clases antiguas, nada empuja las nuevas
+    por encima de las antiguas y el modelo no llega a predecirlas.
     """
     new = torch.zeros(logits.shape[1], dtype=torch.bool, device=logits.device)
     new[torch.as_tensor(list(new_classes), device=logits.device)] = True
-    is_new = new[labels]
+    is_new = new[labels] if incoming is None else incoming.to(logits.device)
     masked = logits.masked_fill(is_new.unsqueeze(1) & ~new.unsqueeze(0), float("-inf"))
     return F.cross_entropy(torch.where(is_new.unsqueeze(1), masked, logits), labels)
 
@@ -254,7 +261,8 @@ def train_local(model, batches, lr, device, preprocess: Optional[Callable] = Non
 
     ``record`` (opcional) recibe pasos, pérdidas, etiquetas vistas y el cambio
     de la capa final, el formato que espera ``verificar_cifar100.py``.
-    ``ace_new_classes``: usa la pérdida de ER-ACE en vez de la entropía cruzada.
+    ``ace_new_classes``: usa la pérdida de ER-ACE en vez de la entropía cruzada; los
+    lotes pueden traer un tercer elemento, la máscara de muestras entrantes.
     ``classifier_only``: solo se entrena la capa final, con el resto en modo
     evaluación (BatchNorm no actualiza sus estadísticas); es el cRT.
     """
@@ -268,12 +276,15 @@ def train_local(model, batches, lr, device, preprocess: Optional[Callable] = Non
     losses, labels_seen = [], Counter()
     if teacher is not None:
         teacher.eval()
-    for xb, yb in batches:
+    for xb, yb, *origin in batches:
         xb = preprocess(xb, augment=augment, generator=generator) if preprocess else xb.float()
         xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad()
         logits = model(xb)
-        loss = ace_loss(logits, yb, ace_new_classes) if ace_new_classes is not None else F.cross_entropy(logits, yb)
+        if ace_new_classes is not None:
+            loss = ace_loss(logits, yb, ace_new_classes, origin[0] if origin else None)
+        else:
+            loss = F.cross_entropy(logits, yb)
         if teacher is not None and distill_weight > 0:
             with torch.no_grad():
                 teacher_logits = teacher(xb)

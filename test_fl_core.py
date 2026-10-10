@@ -169,6 +169,18 @@ class TrainTests(unittest.TestCase):
         plain = torch.nn.functional.cross_entropy(logits.detach()[2:3], labels[2:3])
         self.assertAlmostEqual(fl_core.ace_loss(logits.detach()[2:3], labels[2:3], [3, 4, 5]).item(), plain.item(), places=6)
 
+    def test_ace_replayed_new_classes_use_full_cross_entropy(self):
+        logits = torch.randn(4, 6, requires_grad=True)
+        labels = torch.tensor([3, 4, 0, 5])  # la muestra 3 es de clase nueva pero sale de la memoria
+        incoming = torch.tensor([True, True, False, False])
+        fl_core.ace_loss(logits, labels, [3, 4, 5], incoming).backward()
+        self.assertTrue(torch.all(logits.grad[:2, :3] == 0))
+        self.assertTrue(torch.all(logits.grad[3, :3] != 0))  # empuja las clases nuevas sobre las antiguas
+        batches = list(fl_core.mixed_batches(torch.zeros(10, 1), torch.full((10,), 3), torch.zeros(4, 1),
+                                             torch.zeros(4, dtype=torch.long), 8, 2, 0.5, with_origin=True))
+        xb, yb, origin = batches[0]
+        self.assertEqual(origin.tolist(), [True] * 4 + [False] * 4)
+
     def test_classifier_only_changes_just_the_last_layer(self):
         torch.manual_seed(0)
         model = fl_core.get_model(10)
