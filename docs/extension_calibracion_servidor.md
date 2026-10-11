@@ -25,7 +25,7 @@ Si el problema está sobre todo en la última capa, el **servidor** podría corr
 
 ## Experimentos previstos
 
-- Mismo protocolo que el estudio actual (CIFAR-100, 10 clientes, FedAvg, presupuesto controlado), con **2 tareas y con 5 tareas** (extensión A como base).
+- Mismo protocolo que el estudio actual (CIFAR-100, 10 clientes, FedAvg, presupuesto controlado), primero con **2 tareas** (prototipo) y, si funciona, con **5 tareas** (extensión A como base).
 - Comparar con: sin corrección, WA, cRT local, lotes equilibrados y ER-ACE.
 - Repartos IID y Dirichlet (α = 0,5 y 0,1).
 - Métricas: precisión por tarea y en todas las clases, BWT, proporción de predicciones hacia clases nuevas, coste de comunicación de las estadísticas.
@@ -34,4 +34,13 @@ Si el problema está sobre todo en la última capa, el **servidor** podría corr
 
 - Hito 7 cerrado: resultados de 5 semillas y comparación T4 frente a RTX 5050.
 - Mirar en esos resultados cuánto aporta cRT: si un cRT local ya cierra casi toda la brecha, la versión en el servidor tiene margen pequeño y conviene replantear.
-- Implementar primero la extensión A (más de dos tareas), porque B se evaluará sobre ella.
+
+## Plan por pasos, con un punto de decisión temprano
+
+Es la parte más laboriosa e incierta del proyecto (código nuevo, puede no ganar a cRT local, la novedad puede estar cubierta), así que se divide para saber pronto y barato si merece la pena.
+
+1. **Revisión de novedad** (antes de programar). Leer CCVR, GLFC, TARGET, FedCIL y LANDER. Si alguno ya calibra el clasificador en el servidor en aprendizaje continuo incremental por clases, se replantea la idea aquí.
+2. **Prototipo mínimo con 2 tareas** sobre el código actual (A → B): solo la calibración en el servidor, sin la extensión A. Unos días de código y una tanda de GPU.
+   - **Línea base a batir:** cRT local. Con la semilla 42 (plan_kaggle) da 46,0 % en 100 clases con mezcla normal, 47,9 % con lotes equilibrados y 48,9 % con el calendario, todo con buffer del 20 %; la referencia conjunta ×2 llega al 59,7 %.
+   - **Punto de decisión:** si la calibración en el servidor no se acerca a cRT local (o no lo mejora sin buffer), se ajusta o se cambia de idea antes de invertir en más tareas.
+3. **Solo si el prototipo funciona:** implementar la extensión A (5 tareas), generalizar la calibración a la secuencia de tareas y lanzar el plan completo de experimentos (IID y Dirichlet, varias semillas).
