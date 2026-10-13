@@ -1,0 +1,2 @@
+fraction,rounds,budget_factor,acc_a,acc_b,acc_all_100_classes,avg_acc_tasks
+Conjunto A+B,10,1.0,44.72,45.24,44.98,44.980000000000004

@@ -1,0 +1,2 @@
+n_seeds,acc_a_mean,acc_a_std,acc_b_mean,acc_b_std,acc_all_100_classes_mean,acc_all_100_classes_std,avg_acc_tasks_mean,avg_acc_tasks_std
+5,44.948,0.44398198161637065,46.224000000000004,1.0867750457201353,45.586,0.723415509924966,45.586,0.723415509924966

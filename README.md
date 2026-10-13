@@ -194,7 +194,13 @@ Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por c
 
 ## 7. Resultados y datos
 
-- **No están en git** los resultados de los planes recientes (`resultados/plan_gpu/`, unos 126 MB sin contar los `.pt`; `resultados/kaggle_*`) ni los puntos de control `*.pt` (unos 45 MB cada uno, ignorados por `.gitignore`). Para reproducir hay que relanzar el plan.
+- **En git están los resultados esenciales** de los dos planes: `resultados/plan_gpu/` (RTX 5050, todas las semillas) y `resultados/kaggle_plan_2026-10-10/resultados/plan_kaggle/` (2 × T4, semilla 42, con ER-ACE **sin** corregir). En concreto:
+  - `INFORME.md`, `informe/*.png` y `estado.json`;
+  - los resúmenes `resumen_*.csv`;
+  - por semilla, `results.csv`, `joint_results.csv`, `config.json` e `history.csv`;
+  - los manifiestos de la fase 1.
+
+  Con eso se pueden leer y reanalizar todos los números sin volver a entrenar. **No están en git** los `audit.json`, los registros ni los puntos de control `*.pt` (unos 45 MB cada uno, ignorados por `.gitignore`). Para obtenerlos hay que relanzar el plan.
 - **Estructura de un plan terminado:**
   - `resultados/plan_gpu/<trabajo>/seed_<n>/` con `results.csv`, `joint_results.csv` (si procede), `config.json`, `audit.json` e `history.csv`;
   - `_fase1/<reparto>_seed<n>/phase1_checkpoint.pt`;
