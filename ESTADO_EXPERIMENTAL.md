@@ -1,5 +1,7 @@
 # Estado experimental
 
+> **Documento histórico.** Describe el estado del 8 de octubre de 2026, antes de los resultados válidos. El estado actual y los resultados están en el [README](README.md#1-estado-actual-13-de-octubre-de-2026).
+
 *Última revisión: 8 de octubre de 2026.* Este documento resume en un solo sitio las conclusiones de los informes de `resultados/`. Los informes originales se conservan sin cambios como registro detallado.
 
 ## Conclusión actual

@@ -1,190 +1,234 @@
-# Aprendizaje federado continuo
+# Replay con presupuesto controlado en aprendizaje federado continuo
 
-Proyecto de prácticas para estudiar el olvido catastrófico en modelos de clasificación de imágenes entrenados de forma federada y secuencial. Los experimentos comparan el entrenamiento sin memoria con diferentes capacidades de **replay buffer**, reutilizando muestras de la primera tarea al aprender la segunda.
+Estudio del olvido catastrófico en **aprendizaje federado continuo incremental por clases**: un modelo se entrena de forma federada (10 clientes, FedAvg) primero con las clases 0-49 de CIFAR-100 (tarea **A**) y después con las 50-99 (tarea **B**). Cada cliente guarda un pequeño **buffer** de imágenes de A para repasarlas (replay). El trabajo compara estrategias de replay con un **presupuesto controlado**: todas parten de los mismos pesos, usan memorias anidadas y hacen exactamente el mismo número de actualizaciones, de modo que las diferencias se deben a *cómo* se usa la memoria y no a cuánto se entrena.
 
-> **Estado:** todavía no hay resultados válidos sobre el efecto del buffer. Consulta [ESTADO_EXPERIMENTAL.md](ESTADO_EXPERIMENTAL.md) antes de interpretar cualquier gráfico.
+Este README es la referencia única del proyecto, tanto para personas como para agentes: qué se ha hecho, qué ha salido, cómo reproducirlo y qué hay que tener en cuenta al tocar el código.
 
-## Funcionamiento
+---
 
-Los scripts simulan clientes en un único proceso: cada cliente entrena una copia del modelo global y se agregan sus parámetros con FedAvg. Se usa una ResNet-18 adaptada a imágenes pequeñas, Adam y entropía cruzada. El código común está en `fl_core.py`.
+## 1. Estado actual (13 de octubre de 2026)
 
-1. Entrenar sobre el grupo o dominio A.
-2. Continuar sobre B, incorporando muestras de A cuando se utiliza replay.
-3. Evaluar la precisión en ambos grupos y medir cuánto se pierde en A.
+**El estudio principal está terminado.** El plan completo (`planes/plan_gpu.json`, 56 tareas, 3-5 semillas por configuración) se ejecutó en una NVIDIA RTX 5050. Los resultados están en `resultados/plan_gpu/INFORME.md`, carpeta local que no se versiona (ver §7). Existe un borrador de artículo en un documento de Claude (privado) que recoge todo lo de esta sección.
 
-La pérdida de precisión es `precisión de A antes de B − precisión de A después de B`, en puntos porcentuales (pp). Los porcentajes del buffer son la proporción de muestras de A que conserva cada cliente. Como esa métrica toca fondo cuando A cae a 0 %, `cifar100_three_buffer.py` registra también la retención (A después / A antes), la precisión de A restringida a sus clases, la proporción de predicciones B sobre el test de A y la precisión en las 100 clases.
+### Resultados principales (CIFAR-100, reparto IID, buffer del 20 %)
 
-## Estructura
+Precisión en % (media ± desviación típica entre semillas). Antes de aprender B, A está en 48,0 ± 0,9 %.
+
+| Método | Semillas | A final | B final | Retención de A | 100 clases | 100 clases + cRT |
+|---|---|---|---|---|---|---|
+| Sin replay (buffer 0 %) | 5 | 0,0 | 57,5 ± 1,4 | 0 % | 28,8 ± 0,7 | — |
+| Mezcla normal (`concat`) | 5 | 26,1 ± 0,7 | 56,5 ± 1,1 | 54,3 % | 41,3 ± 0,8 | 46,1 ± 1,1 |
+| Lotes equilibrados + LwF | 5 | 36,8 ± 1,1 | 50,9 ± 0,9 | 76,6 % | 43,8 ± 0,9 | 45,9 ± 0,8 |
+| Calendario adaptativo | 3 | 34,1 ± 0,4 | 57,2 ± 0,1 | 70,1 % | 45,7 ± 0,2 | **49,2 ± 0,3** |
+| Lotes equilibrados (f = 0,5) | 5 | 39,5 ± 0,3 | 52,1 ± 1,0 | 82,3 % | 45,8 ± 0,7 | 47,4 ± 1,0 |
+| ER-ACE adaptado | 3 | **44,1 ± 0,3** | 50,0 ± 0,4 | **90,5 %** | **47,1 ± 0,1** | 47,9 ± 0,2 |
+| Referencia conjunta ×1 (A+B a la vez, mismo presupuesto) | 5 | 44,9 | 46,2 | — | 45,6 ± 0,7 | — |
+| Referencia conjunta ×2 (doble presupuesto) | 3 | 59,2 | 61,1 | — | 60,1 ± 0,6 | — |
+
+### Conclusiones (comparaciones pareadas por semilla)
+
+1. **Lo que decide es la proporción de memoria en cada lote.** Los lotes equilibrados superan a la mezcla normal en +4,5 puntos (100 clases) con cualquier buffer (5 de 5 semillas, p < 0,001). Con la fracción `natural` (misma proporción que la mezcla normal) la ventaja desaparece (+0,2, no significativa). La retención crece con la fracción y B baja; el total es máximo en torno a 0,5.
+2. **ER-ACE adaptado es el mejor método sin correcciones,** y su ventaja crece cuanto menor es la memoria: +0,8 / +2,9 / +4,7 puntos sobre los lotes equilibrados con buffers del 20 / 10 / 5 % (3 de 3 semillas). Su memoria **debe** incluir ejemplos de la tarea actual; sin ellos B = 0 % (ver §5.3).
+3. **cRT mejora todas las variantes.** La mejor combinación es calendario + cRT (49,2 %). **WA** solo ayuda si el modelo está sesgado hacia B (mezcla normal, fracciones bajas, calendario) y perjudica al resto: las logits de B sobre imágenes de A son negativas, y γ > 1 las hace más negativas.
+4. **LwF empeora** los lotes equilibrados (−2,0 puntos; 5 de 5 semillas) con λ = 1 y T = 2, sin ajustar.
+5. **Con datos desiguales (Dirichlet α = 0,5 y 0,1)** los lotes equilibrados siguen ganando (+2,2 a +4,5 puntos), con más coste en B. Con Dirichlet la retención puede pasar del 100 %, así que se comparan precisiones absolutas.
+6. **Reproducibilidad:** en la misma GPU los resultados son idénticos. Entre RTX 5050 y 2 × T4 (Kaggle), con la semilla 42 y 12 configuraciones, la diferencia media es de 0,45 puntos (máx. 0,86), menor que la variación entre semillas.
+
+### Siguiente paso: extensión B
+
+Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por clase de los clientes (en la línea de CCVR, aplicado a tareas secuenciales). Plan por pasos con punto de decisión temprano en [docs/extension_calibracion_servidor.md](docs/extension_calibracion_servidor.md). Línea base a batir: calendario + cRT (49,2 %); margen hasta la referencia ×2 (60,1 %).
+
+> `ESTADO_EXPERIMENTAL.md` describe el estado del 8 de octubre de 2026 (antes de estos resultados) y se conserva como registro histórico.
+
+---
+
+## 2. Guía rápida para agentes
+
+- **Ejecuta siempre en Docker.** En el equipo del autor (Windows), el Python nativo no puede cargar `torch.dll` (bloqueado por Control de aplicaciones) y no hay `python` en el PATH. Todo comando de Python va por `.\run.ps1 ...` (o `.\run.ps1 -dev ...` para usar el código de la carpeta sin reconstruir la imagen).
+- **Tests antes de cambiar nada que importe:** `.\run.ps1 -dev tests` (58 tests, unos 4 min en CPU, 74 s en GPU con `.\run.ps1 -gpu tests` tras reconstruir).
+- **Invariantes del protocolo que no se deben romper sin decidirlo explícitamente:**
+  - `--controlled-replay` (por defecto): mismos pesos de partida, buffers anidados y equilibrados por clase, mismos pasos por ronda para cualquier buffer.
+  - `--buffers` **debe incluir el 0** (es la referencia de cada ejecución).
+  - La fase 1 se entrena una vez por semilla y reparto y se reutiliza con `--phase1-checkpoint`; el manifiesto `.config.json` valida clientes, semilla, datos, preprocesado y reparto.
+  - `--loss ace` exige `--replay-mix balanced`.
+- **Dónde está cada cosa:**
+  - experimento: `cifar100_three_buffer.py`;
+  - núcleo: `fl_core.py`, con modelo, FedAvg, `train_local`, `ace_loss`, `mixed_batches`, `weight_align` y `evaluate`;
+  - orquestación: `plan_experimentos.py` + `planes/*.json`;
+  - informe: `informe_plan.py`;
+  - CLI: `cfl.py`.
+- **Salidas:** siempre en una carpeta nueva de `resultados/`. Un plan escribe en `resultados/<nombre>/` con `estado.json`, `_registros/<tarea>.log` e `INFORME.md`.
+- **Los scripts `.ps1` se guardan en UTF-8 con BOM y CRLF:** Windows PowerShell 5.1 los lee mal sin BOM.
+- **El repositorio está en OneDrive.** Docker no puede leer sus *reparse points*, así que `run.ps1` copia los archivos de git a `%LOCALAPPDATA%\cfl-practicas\contexto-docker` antes de construir (`CFL_CONTEXTO`). Un archivo nuevo debe estar en git (o al menos añadido) para entrar en la imagen.
+- **Commits y pushes:** el autor aprueba cada push. Ramas: `main` (principal) y `dev` (espejo).
+
+---
+
+## 3. Requisitos
+
+- **Docker Desktop** con WSL 2. Es lo único imprescindible: Python, PyTorch, dependencias fijadas, CIFAR-100 y el código van dentro de la imagen.
+- **GPU NVIDIA (opcional, recomendada para el plan completo):** controlador reciente en Windows. Se ha usado una RTX 5050 de 8 GB (arquitectura Blackwell) con el controlador 617.42; la imagen GPU instala PyTorch 2.14.1 + CUDA 13.0.
+- Sin GPU todo funciona en CPU, pero el plan completo tardaría días.
+
+---
+
+## 4. Cómo reproducir
+
+### 4.1 Comprobación rápida (CPU, minutos)
+
+```powershell
+.\run.ps1 info                                # versión de la imagen, datos, GPU
+.\run.ps1 tests                               # tests unitarios
+.\run.ps1 rapido                              # flujo completo con CIFAR-100 real (--quick) + verificación
+.\run.ps1 -dev plan planes/plan_prueba.json   # el plan completo en miniatura (13 tareas, --quick)
+```
+
+### 4.2 Plan completo en GPU (los resultados de la §1)
+
+```powershell
+.\lanzar_gpu.ps1                      # 1.ª vez: comprueba la GPU, construye la imagen CUDA, pasa los tests y ejecuta el plan
+.\vigilar_gpu.ps1 -Paralelo 2         # recomendado: el mismo plan con recuperación automática de cuelgues
+.\vigilar_gpu.ps1 -Paralelo 2 -Hasta 00:00   # por tandas: no empieza tareas nuevas a partir de esa hora
+.\lanzar_gpu.ps1 -Simular             # lista lo pendiente sin ejecutar
+```
+
+- **Duración:** unas 22 h de GPU en una RTX 5050 con 2 tareas a la vez. Por tipo de tarea: fase 1 unos 22 min (3 a la vez); 3 buffers unos 50-58 min; 4 buffers (ER-ACE) unos 70 min; referencia ×2 unos 84 min; Dirichlet α = 0,1 hasta 63 min.
+- **Reanudable:** relanzar el mismo comando salta lo terminado. Las tareas a medias se apartan (`*_incompleta_<fecha>`) y se repiten desde el principio. Un solo Ctrl+C lo detiene todo.
+- **Límite de tiempo:** `-Hasta HH:MM` u `-Horas N`. Las tareas en curso a esa hora terminan antes de parar, y el código de salida 3 significa pausa.
+- Mientras corre, el PC no se suspende. Al terminar o pausar **sí puede suspenderse**: si se relanza desde otra sesión remota, el comando no se ejecuta hasta que el PC despierte.
+
+### 4.3 En Kaggle (2 × T4)
+
+`kaggle_plan.ipynb` clona el repositorio en un commit fijo (`COMMIT = "6ceab93"`), ejecuta `planes/plan_prueba.json` y después `planes/plan_kaggle.json` (el plan con la semilla 42) y empaqueta `resultados_kaggle.tar.gz` sin los `.pt`. **Ese commit es anterior a la corrección de ER-ACE (67b2740):** actualiza `COMMIT` antes de reutilizarlo. Sesión con GPU T4 ×2 e Internet activado; el plan con la semilla 42 tarda unas 6 h 40 min.
+
+### 4.4 Un experimento suelto
+
+```powershell
+.\run.ps1 python cifar100_three_buffer.py --buffers 0 10 20 --replay-mix balanced --loss ace --seed 42 --local-epochs 5 --rounds 5
+.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20 --replay-mix balanced   # varias semillas + verificación + resumen
+```
+
+---
+
+## 5. Protocolo experimental
+
+### 5.1 Configuración
+
+| Elemento | Valor |
+|---|---|
+| Datos | CIFAR-100, `uoft-cs/cifar100` vía Flower Datasets, revisión `aadb3af77e9048adbea6b47c21a81e47dd092ae5`; 25 000 de entrenamiento y 5 000 de test por tarea |
+| Clientes | 10; IID (2 500 imágenes por tarea y cliente) o Dirichlet por clase (`flwr` `DirichletPartitioner`, α = 0,5 / 0,1) |
+| FedAvg | Media simple en IID; ponderada por tamaño en Dirichlet (los clientes sin datos no participan) |
+| Modelo | ResNet-18 de torchvision con primera convolución 3 × 3 y sin max-pooling, 100 salidas |
+| Entrenamiento | Adam, lr 1e-3, lote 32, 5 épocas locales (el valor por defecto del script es 10: el plan pasa `--local-epochs 5`), 5 rondas por fase |
+| Preprocesado | Normalización con media y desviación de CIFAR-100; recorte aleatorio con relleno de 4 y volteo horizontal |
+| Buffers | 0, 5, 10 y 20 % de las imágenes de A de cada cliente, anidados y equilibrados por clase |
+| Semillas | 42-46 para mezcla normal, lotes equilibrados y LwF; 42-44 para el resto |
+
+**Presupuesto controlado:** en cada ronda de la fase 2, cada cliente hace `épocas · ceil(n_B / 32)` pasos, sea cual sea el buffer.
+
+### 5.2 Variantes y sus opciones
+
+| Variante | Opciones de `cifar100_three_buffer.py` |
+|---|---|
+| Mezcla normal | `--replay-mix concat` (por defecto): B y el buffer barajados juntos, truncado al presupuesto |
+| Lotes equilibrados | `--replay-mix balanced --replay-batch-fraction 0.5`: `round(32·f)` muestras del buffer (con reposición) en cada lote |
+| Ablación de la fracción | `--replay-batch-fraction natural / 0.25 / 0.75`; `natural` = tamaño del buffer / (tamaño de B + tamaño del buffer) |
+| Calendario adaptativo | `--replay-fraction-schedule 0.75,0.5,0.25,0.25,0.25` (una fracción por ronda) |
+| LwF | `--distill-weight 1` (KL sobre las logits de A respecto al modelo de la fase 1, T = 2) |
+| ER-ACE adaptado | `--replay-mix balanced --loss ace` |
+| Referencia conjunta | `--joint [--joint-budget-factor 2]`: A y B a la vez desde cero; va a `joint_results.csv` |
+| Datos desiguales | `--partition dirichlet --dirichlet-alpha 0.5` |
+| Solo fase 1 / reutilizarla | `--only-phase1`, `--phase1-checkpoint RUTA` |
+| Correcciones posteriores | WA (completo, solo pesos, solo sesgo) siempre; cRT con `--crt-epochs 2` (por defecto; 0 lo desactiva) |
+
+### 5.3 ER-ACE: detalle importante
+
+`fl_core.ace_loss` enmascara las clases antiguas en las **muestras entrantes** y usa la entropía cruzada completa en las de la **memoria**. La máscara va por el **origen** de la muestra, con un tercer elemento del lote (`mixed_batches(..., with_origin=True)`), no por su clase. En el método original la memoria contiene también la tarea actual. Por eso `Experiment.ace_memory` (en `cifar100_three_buffer.py`) construye, para cada cliente, el buffer de A **más el mismo número de imágenes de B**, equilibradas por clase (ya están en el cliente: no aumenta la memoria de A). Con buffer 0 % no hay memoria y se usa entropía cruzada normal. La primera versión, con la memoria solo de A, daba B = 0 % en todos los buffers.
+
+### 5.4 Métricas (`results.csv`, una fila por buffer)
+
+| Columna | Significado |
+|---|---|
+| `step3_acc_a` | A antes de la fase 2 |
+| `step4_acc_a`, `step4_acc_b` | A y B finales, eligiendo entre las 100 clases |
+| `acc_all_100_classes` | Test completo; métrica principal (igual a la media de A y B) |
+| `retention_a_percent` | A final / A antes × 100 |
+| `bwt_a` | A final − A antes |
+| `avg_acc_tasks` | Media de las precisiones por tarea |
+| `group_aware_acc_a` | A restringida a sus propias clases (diagnóstico) |
+| `pred_share_b_on_test_a` | Proporción de predicciones B sobre el test de A |
+| `mean_logit_a_test_a`, `mean_logit_b_test_a` | Logits medias de las clases A y B sobre imágenes de A |
+| `wa_*`, `wa_w_*`, `wa_b_*` | El mismo modelo tras WA completo, solo pesos y solo sesgo (`wa_gamma` = γ) |
+| `crt_*` | Tras cRT (solo con buffer > 0) |
+
+`joint_results.csv` guarda la referencia conjunta (`acc_a`, `acc_b`, `acc_all_100_classes`, `budget_factor`). Con varias semillas, `agregar_semillas.py` genera `resumen_semillas.csv` y `resumen_conjunto.csv`.
+
+---
+
+## 6. Estructura del repositorio
 
 | Archivo | Contenido |
-| --- | --- |
-| `cifar100_three_buffer.py` | Experimento principal con CIFAR-100: clases 0–49 (A) y 50–99 (B), buffers configurables, variantes de replay, auditoría. |
-| `domainnet.py` | Cambio de dominio de fotos reales a bocetos con las 10 primeras clases de DomainNet. |
-| `mvtecad_all_experiments.py` | Clasificación de las 15 categorías de MVTec AD (7 en A, 8 en B) y coste de almacenamiento del buffer. No es detección de anomalías. |
-| `fl_core.py` | Modelo, FedAvg, entrenamiento local, evaluación, preprocesado y lotes de replay compartidos. |
-| `experiment_common.py` | Argumentos, buffers anidados, tablas, CSV y gráficos de DomainNet y MVTec. |
-| `cifar100_sampling.py`, `cifar100_validation.py` | Muestreo equilibrado y controles de aprendizaje. |
-| `verificar_cifar100.py` | Recalcula las métricas desde los checkpoints con un evaluador independiente. |
-| `agregar_semillas.py` | Media ± desviación típica entre semillas. |
-| `cfl.py`, `run.ps1`, `run.bat` | Interfaz única (`cfl.py`, dentro del contenedor) y lanzadores de Windows que construyen y ejecutan la imagen. |
-| `Dockerfile`, `docker-compose.yml`, `docker/` | Imagen reproducible (dependencias, datos y código) y su punto de entrada. |
-| `legacy/` | Scripts históricos (`step_four.py`, `step_six_v1.py`, `three_buffer_size.py`, `three_buffer_v2.py`), conservados para reproducir los resultados antiguos. |
-| `resultados/` | Una carpeta por ejecución; `resultados/historicos/` guarda los gráficos y registros antiguos. |
-| `test_*.py` | Tests unitarios y una prueba de extremo a extremo con datos sintéticos (sin Internet). |
+|---|---|
+| `cifar100_three_buffer.py` | Experimento principal (fases, buffers, variantes, correcciones, referencia conjunta, auditoría) |
+| `fl_core.py` | Modelo, FedAvg, entrenamiento local, pérdidas (LwF, ACE), lotes de replay, WA, evaluación y preprocesado |
+| `cifar100_sampling.py`, `cifar100_validation.py` | Muestreo equilibrado por clase y contrato de validación del punto de control de la fase 1 |
+| `plan_experimentos.py` | Orquestador de planes: fase 1 compartida, tareas en paralelo, reparto entre GPUs, reanudación, límite de tiempo |
+| `informe_plan.py` | Genera `INFORME.md` y las gráficas de un plan |
+| `planes/plan_gpu.json` | Plan completo (56 tareas). `plan_kaggle.json`: solo la semilla 42. `plan_prueba.json`: miniatura con `--quick` |
+| `cfl.py` | CLI dentro del contenedor: `info`, `entorno`, `tests`, `rapido`, `comparar`, `semillas`, `plan` |
+| `run.ps1`, `run.bat` | Lanzador de Windows: construye y ejecuta la imagen (`-dev`, `-gpu`, `-cpu`) |
+| `lanzar_gpu.ps1` | Prepara la GPU (comprobación, imagen CUDA, tests) y ejecuta un plan; `-SoloPlan`, `-Hasta`, `-Horas`, `-Paralelo`, `-Simular` |
+| `vigilar_gpu.ps1` | Ejecuta `lanzar_gpu.ps1 -SoloPlan` y recupera los cuelgues de la GPU (§8) |
+| `Dockerfile`, `docker-compose.yml`, `docker/` | Imagen reproducible (CPU o CUDA, `TORCH_VARIANT`) con CIFAR-100 incluido; `entrypoint.sh` |
+| `verificar_cifar100.py` | Recalcula las métricas desde los pesos con un evaluador independiente (solo exacto en CPU) |
+| `agregar_semillas.py` | Media ± desviación entre semillas |
+| `kaggle_plan.ipynb`, `kaggle_experimento.ipynb` | Cuadernos de Kaggle (plan con la semilla 42; experimento suelto) |
+| `docs/extension_calibracion_servidor.md` | Diseño de la siguiente extensión |
+| `domainnet.py`, `mvtecad_all_experiments.py`, `experiment_common.py` | Experimentos secundarios (cambio de dominio, MVTec AD como clasificación) |
+| `legacy/`, `comparar_replay.ps1`, `repetir_semillas.ps1` | Scripts históricos y lanzadores antiguos, conservados por compatibilidad |
+| `test_*.py` | Tests unitarios y de extremo a extremo con datos sintéticos, sin red. GitHub Actions los ejecuta en cada push |
+| `resultados/` | Una carpeta por ejecución. En git solo están las ejecuciones antiguas (auditoría del 2 de octubre e `historicos/`) |
 
-Los scripts de experimento solo entrenan al ejecutarse (`python script.py`); `cifar100_three_buffer.py` puede importarse sin efectos.
+---
 
-## Inicio rápido (Docker)
+## 7. Resultados y datos
 
-Solo hace falta **Docker Desktop** abierto. Todo lo demás (Python, PyTorch, dependencias fijadas, CIFAR-100 y el propio código) va dentro de una imagen, así que la ejecución es idéntica en cualquier equipo y no necesita Internet una vez construida.
+- **No están en git** los resultados de los planes recientes (`resultados/plan_gpu/`, unos 126 MB sin contar los `.pt`; `resultados/kaggle_*`) ni los puntos de control `*.pt` (unos 45 MB cada uno, ignorados por `.gitignore`). Para reproducir hay que relanzar el plan.
+- **Estructura de un plan terminado:**
+  - `resultados/plan_gpu/<trabajo>/seed_<n>/` con `results.csv`, `joint_results.csv` (si procede), `config.json`, `audit.json` e `history.csv`;
+  - `_fase1/<reparto>_seed<n>/phase1_checkpoint.pt`;
+  - `_registros/<tarea>.log`, más `vigilante.log` y `diagnostico_*.txt` si hubo cuelgues;
+  - `estado.json`;
+  - `INFORME.md` e `informe/*.png`.
+- **CIFAR-100** viene dentro de la imagen y funciona sin conexión. DomainNet se descarga en el volumen `cfl-datos`. MVTec AD se lee de `data/` (licencia CC BY-NC-SA 4.0, formulario oficial).
+- `resultados/historicos/` contiene resultados anteriores a fijar semillas y entorno, con errores documentados en [su README](resultados/historicos/README.md). No son comparables con los actuales.
 
-```powershell
-.\run.ps1                 # menú interactivo (o doble clic en run.bat)
-.\run.ps1 info            # versión de la imagen, datos, hilos y GPU
-.\run.ps1 tests           # tests unitarios dentro del contenedor
-.\run.ps1 rapido          # prueba funcional con CIFAR-100 real + verificación
-.\run.ps1 comparar        # comparación 0 % / 20 %, 5 épocas locales, verificada desde los pesos
-```
+---
 
-La primera vez, el lanzador construye la imagen automáticamente: descarga las dependencias y CIFAR-100 y tarda unos minutos. Después solo se reconstruye lo que cambia.
+## 8. Problemas conocidos y soluciones
 
-### Comandos
+| Problema | Síntoma | Solución |
+|---|---|---|
+| **La GPU se cuelga dentro de WSL** (desde la actualización de Windows 26H2 del 12 de octubre de 2026) | Las tareas siguen vivas pero no avanzan, la GPU está al 0-4 % y el controlador registra `nvlddmkm` 153 ("Error occurred on GPUID: 100"), a veces unos minutos *después* de que se paren | Usar `vigilar_gpu.ps1`: si el registro de **cualquier** tarea en curso pasa 10 min sin escribirse, guarda un diagnóstico, reinicia WSL y Docker y relanza el plan. Con 2 tareas en paralelo (`-Paralelo 2`) los cuelgues son menos frecuentes. Causa no identificada; no se ha investigado más |
+| Windows Update cambia el controlador de NVIDIA | Controlador antiguo (610.88) tras reiniciar | Reinstalar el controlador desde nvidia.com (617.42 o posterior) |
+| Docker Desktop no arranca tras matarlo | `initializing Secrets Engine ... engine.sock ... El sistema no tiene acceso al archivo` | Cerrar **todos** los procesos `Docker Desktop` y `com.docker.*`, `wsl --shutdown`, borrar `%LOCALAPPDATA%\docker-secrets-engine\engine.sock*` y abrir Docker de nuevo (`vigilar_gpu.ps1` ya lo hace) |
+| Docker recién arrancado | La primera tarea muere con `CUDA error: unknown error` o `unexpected EOF` | Esperar 2-3 min tras abrir Docker Desktop antes de lanzar el plan |
+| Construcción de la imagen desde OneDrive | `invalid file request` | Ya resuelto: `run.ps1` construye desde una copia fuera de OneDrive |
+| Jugar o usar otras aplicaciones gráficas mientras corre el plan | Cuelgue al abrir el juego | Evitarlo, o pausar el plan entre tareas |
+| Aviso "La imagen tiene el código X y tu carpeta está en Y" | — | Inofensivo si los commits nuevos no tocan los experimentos; si los tocan, `.\run.ps1 -gpu construir` |
+| Mensaje de Docker "Debug this Compose error with Gordon" | Al pausar (código 3) o interrumpir | Inofensivo |
 
-| Comando | Qué hace |
-| --- | --- |
-| `info` | Muestra la revisión del código de la imagen, versiones, hilos, GPU y datos disponibles. |
-| `tests` | Tests unitarios. |
-| `rapido` | `cifar100_three_buffer.py --quick --audit` y verificación independiente. Comprueba el flujo, no el aprendizaje. |
-| `comparar [opciones]` | Comparación de replay con todos los datos, verificada desde los pesos; con varias semillas añade el resumen media ± desviación. Opciones: `--seeds 42 43 44`, `--buffers 0 5 10 20`, `--local-epochs 5`, `--rounds 5`, `--replay-mix balanced`, `--replay-batch-fraction 0.5`, `--distill-weight 1`, `--conjunto`, `--reuse-checkpoint`, `--threads N`, `--output-dir`, `--dry-run`. |
-| `semillas SCRIPT [opciones]` | Repite `cifar100_three_buffer.py`, `domainnet.py`, `mvtecad_all_experiments.py` o `legacy/three_buffer_v2.py` con `--seeds` y resume. El resto de argumentos se pasa al script. |
-| `construir` | Reconstruye la imagen con el código actual. |
-| `python ...`, `bash` | Cualquier comando dentro del contenedor. |
+---
 
-Ejemplos:
+## 9. Historial breve
 
-```powershell
-.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20
-.\run.ps1 comparar --seeds 42 43 44 --buffers 0 20 --replay-mix balanced --distill-weight 1
-.\run.ps1 semillas domainnet.py --seeds 42 43 44 --buffers 0 10 20
-.\run.ps1 python cifar100_three_buffer.py --validation --audit --buffers 0 20
-```
-
-Los resultados aparecen siempre en una carpeta nueva dentro de `resultados/`.
-
-### Código congelado o modo desarrollo
-
-Por defecto se ejecuta el código **que está dentro de la imagen**: cada ejecución queda ligada a una versión exacta. `config.json` registra la revisión de git, la fecha de construcción, las versiones y una huella (SHA-256) de todos los paquetes instalados. Si cambias el código, el lanzador te avisa de que la imagen es de otra versión; `.\run.ps1 construir` la actualiza.
-
-Para probar cambios sin reconstruir, añade `-dev` delante del comando: monta tu carpeta sobre el código de la imagen.
-
-```powershell
-.\run.ps1 -dev tests
-.\run.ps1 -dev comparar --reuse-checkpoint --local-epochs 1      # necesita global_model_phase1.pt de tu carpeta
-```
-
-### GPU NVIDIA (opcional)
-
-Si `run.ps1` detecta una GPU NVIDIA te lo indica. Para usarla, construye la variante GPU una vez; a partir de ahí se usa automáticamente (`-cpu` fuerza la de CPU):
-
-```powershell
-.\run.ps1 -gpu construir
-.\run.ps1 info            # debe mostrar "cuda_available": true y el nombre de la GPU
-```
-
-Requiere el controlador NVIDIA actualizado y Docker Desktop con WSL 2; no se ha podido probar en este equipo. En GPU los resultados pueden diferir en los últimos decimales de los de CPU, por eso la verificación exacta desde los pesos solo se hace para ejecuciones en CPU.
-
-### Sin el lanzador
-
-```powershell
-docker compose build cfl
-docker compose run --rm cfl comparar --seeds 42 43
-docker compose run --rm dev tests                     # modo desarrollo
-docker compose --profile gpu run --rm gpu info        # GPU
-```
-
-Opciones de construcción (`--build-arg`): `TORCH_VARIANT=cpu|cuda|system` (`system` usa el PyTorch de la imagen base, por ejemplo `BASE_IMAGE=nvcr.io/nvidia/pytorch:...`) y `PRELOAD_DATA=0`, que no incluye CIFAR-100 y lo descarga en el volumen `cfl-datos` la primera vez.
-
-El Python nativo de Windows de este equipo no puede cargar `torch.dll` (WinError 4551, bloqueado por Control de aplicaciones): usa siempre Docker.
-
-
-### Opciones de `cifar100_three_buffer.py`
-
-| Opción | Efecto |
-| --- | --- |
-| `--quick` / `--validation` | Prueba funcional mínima / piloto reducido con controles de aprendizaje. Sin ellas: datos completos. |
-| `--buffers 0 5 10 ...` | Porcentajes a comparar (0–99). El 0 % es obligatorio y siempre se mide. |
-| `--rounds N`, `--local-epochs N`, `--seed N` | Sobrescriben rondas, épocas locales (10 por defecto) y semilla (42). |
-| `--controlled-replay` / `--no-controlled-replay` | Por defecto todas las variantes parten de los mismos pesos, usan buffers anidados y hacen las mismas actualizaciones. `--no-controlled-replay` recupera el diseño antiguo, en el que más buffer también implica más pasos. |
-| `--replay-mix concat` / `balanced` | `concat` baraja B y el buffer juntos (diseño original). `balanced` reserva en cada lote una fracción fija para el buffer (`--replay-batch-fraction`, 0,5 por defecto). |
-| `--distill-weight L` | Destilación sobre los logits de las clases A respecto al modelo de la fase A (estilo LwF). 0 la desactiva. |
-| `--normalize` / `--no-normalize`, `--augment` / `--no-augment` | Normalización de CIFAR-100 y aumento de datos (recorte con relleno y volteo), activados por defecto. |
-| `--phase1-checkpoint RUTA` | Reutiliza unos pesos de fase A. Exige su manifiesto (`.config.json`) y comprueba que coinciden los clientes, la semilla, los datos y el preprocesado. |
-| `--audit` | Guarda diagnósticos y pesos para `verificar_cifar100.py`. |
-| `--joint` | Añade la cota superior: entrenamiento conjunto A+B desde cero con el mismo presupuesto (2 × rondas, mismos pasos por ronda). Va a `joint_results.csv` y añade a `results.csv` la distancia a esa cota (`gap_all_vs_joint`, `intransigence_b`). En `cfl comparar` es `--conjunto`; no depende de la variante, así que basta con pedirlo en una. |
-
-Cada fila de `results.csv` incluye además las métricas estándar de aprendizaje continuo para dos tareas (`avg_acc_tasks`, precisión media por tarea; `bwt_a`, *backward transfer*) y el mismo modelo evaluado con **Weight Aligning** (columnas `wa_*`): la capa final reescalada para que las clases B no tengan pesos más grandes que las A. Es una corrección posterior, no cambia el entrenamiento, y `verificar_cifar100.py` la recalcula por su cuenta.
-
-Al entrenar la fase A, cada ejecución guarda `phase1_checkpoint.pt` y `phase1_checkpoint.config.json` para reutilizarlos más adelante.
-
-`global_model_phase1.pt` (A = 26,88 %) se entrenó con `legacy/step_four.py`, 1 época local y **sin** normalización ni aumento. Para reutilizarlo hay que añadir `--no-normalize --no-augment`, o usar `.\comparar_replay.ps1 -ReuseCheckpoint`, que ya lo hace.
-
-DomainNet y MVTec aceptan `--seed`, `--buffers`, `--rounds`, `--local-epochs`, `--output-dir` y `--equal-steps` / `--no-equal-steps` (mismas actualizaciones por variante, activado por defecto).
-
-### Comparación completa verificada
-
-```powershell
-.\run.ps1 comparar                                                   # 0 % frente a 20 %, 5 épocas locales
-.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20              # varias semillas, con resumen
-.\run.ps1 comparar --seeds 42 43 44 --buffers 0 20 --replay-mix balanced --distill-weight 1
-.\run.ps1 comparar --seeds 42 43 44 --buffers 0 5 10 20 --conjunto   # con la cota superior
-.\run.ps1 -dev comparar --reuse-checkpoint --local-epochs 1          # repite el régimen antiguo
-```
-
-`comparar_replay.ps1` y `repetir_semillas.ps1` siguen funcionando con sus parámetros antiguos (`-Seeds 42,43`, `-Buffers 0,20`...) y los traducen a estos comandos.
-
-Entrena la fase A, compara los buffers con replay controlado y verifica las métricas desde los pesos (`verificar_cifar100.py`). Con varias semillas genera además `resumen_semillas.csv` y `perdida_A_media_semillas.png`.
-
-### Plan completo en una GPU NVIDIA
-
-```powershell
-.\lanzar_gpu.ps1                 # comprueba la GPU, construye la imagen CUDA, pasa los tests y ejecuta el plan
-.\lanzar_gpu.ps1 -Simular        # lista las tareas pendientes sin ejecutarlas
-.\lanzar_gpu.ps1 -SoloPlan       # reanuda el plan tras un corte (sin reconstruir ni pasar los tests)
-.\run.ps1 -dev plan planes/plan_prueba.json   # el mismo plan en miniatura (--quick), en CPU, en minutos
-```
-
-`planes/plan_gpu.json` define los experimentos por orden de prioridad: las tres variantes con 5 semillas (42-46), la ablación de la fracción del lote (natural, 0,25, 0,75), ER-ACE, la referencia conjunta con presupuesto ×2, el replay con calendario (0,75-0,5-0,25-0,25-0,25) y el reparto Dirichlet (α = 0,5 y 0,1) con mezcla normal y lotes equilibrados. `plan_experimentos.py` entrena la fase 1 una sola vez por semilla y reparto, lanza varias tareas a la vez en la GPU, se puede reanudar (salta lo terminado y aparta lo que quedó a medias) y un solo Ctrl+C lo detiene todo. Al terminar agrega las semillas y `informe_plan.py` escribe `resultados/plan_gpu/INFORME.md` con tablas (media ± desviación) y gráficas. El progreso queda en `resultados/plan_gpu/_registros/` y `estado.json`.
-
-Cada fila de `results.csv` incluye además, sin coste de entrenamiento apreciable: WA completo, solo pesos y solo sesgo (`wa_*`, `wa_w_*`, `wa_b_*`), las logits medias de las clases A y B sobre el test de A (`mean_logit_*`) y cRT, la capa final reentrenada con el buffer y otras tantas imágenes de B (`crt_*`).
-
-### Pruebas reducidas y piloto
-
-```powershell
-.\run.ps1 rapido
-.\run.ps1 python cifar100_three_buffer.py --validation --audit --buffers 0 20 --output-dir resultados/piloto
-.\run.ps1 python verificar_cifar100.py resultados/piloto
-```
-
-`--quick` usa 2 clientes, 1 ronda, 1 época y 100 muestras por grupo: comprueba el flujo, no el aprendizaje, y no genera gráficos comparativos. `--validation` usa 2 clientes, 500 imágenes por grupo y cliente, y cancela la comparación si el modelo no alcanza unos mínimos de aprendizaje en A, en B y en las propias imágenes del buffer. Esos umbrales son controles operativos, no una certificación científica. Una comparación inconcluyente hace que el verificador termine con código 2.
-
-## Tests
-
-```powershell
-.\run.ps1 tests
-```
-
-Cubren el muestreo, los argumentos, FedAvg, los lotes de replay, el preprocesado, las métricas y una ejecución completa de `cifar100_three_buffer.py` con datos sintéticos (unos 2 minutos en CPU). GitHub Actions los ejecuta en cada push (`.github/workflows/tests.yml`) y además construye la imagen y ejecuta los tests y `rapido` dentro de ella sin red.
-
-## Datos
-
-- **CIFAR-100:** `uoft-cs/cifar100` mediante Flower Datasets, fijado al commit `aadb3af77e9048adbea6b47c21a81e47dd092ae5`.
-- **DomainNet:** `wltjr1007/DomainNet` (splits `train` y `test`), fijado al commit `ee20570ae7a29c51571e55a9a17983f7625295d6`.
-- **MVTec AD:** copia local en `data/mvtec_anomaly_detection/`, con una carpeta por categoría (`<categoría>/train/good/*.png`, `<categoría>/test/<tipo>/*.png`). Se obtiene desde el [formulario oficial](https://www.mvtec.com/research-teaching/datasets/mvtec-ad); licencia CC BY-NC-SA 4.0.
-
-CIFAR-100 viene dentro de la imagen y se usa sin conexión. DomainNet se descarga la primera vez en el volumen `cfl-datos` y se conserva entre ejecuciones. MVTec se lee de `data/` en tu carpeta (montada en solo lectura).
-
-## Resultados históricos
-
-`resultados/historicos/` contiene los gráficos y registros anteriores a fijar la semilla y el entorno, sin modificar. Contienen errores documentados: en `group_a_accuracy_loss_all_buffers.png` la barra «No Replay» **no se midió**, y la versión antigua de `step_six_v1.py` etiquetaba siempre los buffers como «5 %» y «15 %» (el primer bloque de `results_step_six_macbook.txt` corresponde en realidad al 25 % y al 50 %). Detalles en [su README](resultados/historicos/README.md).
-
-Los checkpoints (`*.pt`) no se versionan en git porque pesan unos 45 MB cada uno.
+| Fecha | Hito |
+|---|---|
+| 2 de octubre | Auditoría del protocolo antiguo: todas las variantes acababan con A = 0 % |
+| 8 de octubre | Núcleo común `fl_core.py`, normalización y aumento, replay controlado, lotes equilibrados, LwF, imagen Docker |
+| 8-9 de octubre | Primeros resultados con 1 y 3 semillas (CPU y Kaggle) |
+| 9-10 de octubre | Plan automático, WA y variantes, cRT, ER-ACE, Dirichlet, calendario, referencia ×2; plan con la semilla 42 en Kaggle (2 × T4) |
+| 10 de octubre | Corrección de ER-ACE (memoria con A y B; máscara por origen) |
+| 11-13 de octubre | Plan completo en la RTX 5050 (56 tareas); vigilante de cuelgues |
+| 13 de octubre | Borrador del artículo con todos los resultados |
