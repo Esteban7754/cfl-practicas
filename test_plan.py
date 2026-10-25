@@ -37,6 +37,20 @@ class BuildTests(unittest.TestCase):
         self.assertTrue(checkpoint.endswith("phase1_checkpoint.pt") and "iid_seed42" in checkpoint)
         self.assertIn("--partition", next(t for t in tasks if t["id"] == "c_seed42")["args"])
 
+    def test_plan_can_choose_the_experiment_script(self):
+        default = plan_experimentos.build_tasks(make_plan("resultados/x"))
+        self.assertTrue(all(plan_experimentos.command(t)[1] == "cifar100_three_buffer.py" for t in default))
+        tasks = plan_experimentos.build_tasks({**make_plan("resultados/x"), "script": "cfl_tareas.py"})
+        self.assertTrue(all(plan_experimentos.command(t)[1] == "cfl_tareas.py" for t in tasks))
+
+    def test_task_plans_are_consistent(self):
+        for name in ("plan_tareas.json", "plan_prueba_tareas.json"):
+            plan = json.loads((ROOT / "planes" / name).read_text(encoding="utf-8"))
+            self.assertEqual((plan["script"], plan["informe"]), ("cfl_tareas.py", "informe_tareas.py"))
+            self.assertTrue((ROOT / plan["script"]).is_file() and (ROOT / plan["informe"]).is_file())
+            for task in plan_experimentos.build_tasks(plan):
+                self.assertNotIn("--local-epochs", task["args"])  # hiperparámetros fijos
+
 
 class RunTests(unittest.TestCase):
     def run_with(self, script, out):
@@ -132,6 +146,40 @@ class ReportTests(unittest.TestCase):
             self.assertIn("sin resultados todavía", report)  # fraccion_075 aún no ha corrido
             self.assertIn("Ablación de la fracción", report)
             self.assertTrue((out / "informe" / "fraccion.png").is_file())
+
+    def test_task_report_handles_partial_results(self):
+        import informe_tareas
+
+        with tempfile.TemporaryDirectory(dir=ROOT / "resultados") as tmp:
+            out = Path(tmp)
+            plan = {"nombre": "prueba", "salida": str(out.relative_to(ROOT)),
+                    "trabajos": [{"id": "normal", "semillas": [42, 43]}, {"id": "equilibrados", "semillas": [42, 43]},
+                                 {"id": "er_ace", "semillas": [42]}]}
+            for job, base in (("normal", 20.0), ("equilibrados", 30.0)):
+                for seed in (42, 43):
+                    folder = out / job / f"seed_{seed}"
+                    folder.mkdir(parents=True)
+                    rows = [{"buffer": b, "acc_final": base + b / 10 + seed - 42, "acc_incremental_media": base,
+                             "olvido_medio": 10, "bwt": -10, "acc_t1_final": 5, "acc_t5_final": 60,
+                             "wa_acc_final": base, "crt_acc_final": "" if b == 0 else base + 1} for b in (0, 20)]
+                    with open(folder / "results.csv", "w", newline="", encoding="utf-8") as handle:
+                        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+                        writer.writeheader()
+                        writer.writerows(rows)
+                    with open(folder / "matriz.csv", "w", newline="", encoding="utf-8") as handle:
+                        writer = csv.DictWriter(handle, fieldnames=["buffer", "tras_tarea", "tarea", "acc"])
+                        writer.writeheader()
+                        writer.writerows({"buffer": b, "tras_tarea": t, "tarea": i, "acc": base + 10 * (i == t)}
+                                         for b in (0, 20) for t in range(1, 6) for i in range(1, t + 1))
+            plan_path = out / "plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            informe_tareas.main(plan_path)
+            report = (out / "INFORME.md").read_text(encoding="utf-8")
+            self.assertIn("32,5 ± 0,7", report)  # equilibrados, buffer 20: media ± desviación de dos semillas
+            self.assertIn("sin resultados todavía", report)
+            self.assertIn("10,0 ± 0,0", report)  # diferencia pareada con la mezcla normal
+            self.assertTrue((out / "informe" / "curva_incremental.png").is_file())
+            self.assertTrue((out / "informe" / "matrices.png").is_file())
 
 
 if __name__ == "__main__":

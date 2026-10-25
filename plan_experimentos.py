@@ -28,11 +28,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+# Experimento e informe por defecto (el estudio de 2 tareas); un plan puede elegir otros
+# con las claves "script" e "informe", p. ej. cfl_tareas.py e informe_tareas.py.
+DEFAULT_SCRIPT, DEFAULT_REPORT = "cifar100_three_buffer.py", "informe_plan.py"
 
 
 def build_tasks(plan):
     out = Path(plan["salida"])
     common = plan.get("comun", [])
+    script = plan.get("script", DEFAULT_SCRIPT)
     phase1, tasks = {}, []
     for job in plan["trabajos"]:
         key = job.get("fase1", "iid")
@@ -41,11 +45,11 @@ def build_tasks(plan):
         for seed in job["semillas"]:
             p1 = phase1.setdefault((key, seed), {
                 "id": f"fase1_{key}_seed{seed}", "dir": out / "_fase1" / f"{key}_seed{seed}", "deps": [],
-                "done": "phase1_checkpoint.pt",
+                "done": "phase1_checkpoint.pt", "script": script,
                 "args": [*common, *plan["fase1"][key], "--seed", str(seed), "--only-phase1", "--buffers", "0"]})
             tasks.append({
                 "id": f"{job['id']}_seed{seed}", "job": job["id"], "dir": out / job["id"] / f"seed_{seed}",
-                "deps": [p1["id"]], "done": "results.csv",
+                "deps": [p1["id"]], "done": "results.csv", "script": script,
                 "args": [*common, *plan["fase1"][key], *job["args"], "--seed", str(seed),
                          "--phase1-checkpoint", str(p1["dir"] / "phase1_checkpoint.pt")]})
     return list(phase1.values()) + tasks
@@ -56,7 +60,7 @@ def is_done(task):
 
 
 def command(task):
-    return [sys.executable, "cifar100_three_buffer.py", *task["args"], "--output-dir", str(task["dir"])]
+    return [sys.executable, task.get("script", DEFAULT_SCRIPT), *task["args"], "--output-dir", str(task["dir"])]
 
 
 PAUSED = 3  # código de salida cuando se para por el límite de tiempo con tareas pendientes
@@ -228,13 +232,14 @@ def schedule(pending, running, status, tasks, parallel, env, logs, out, start, a
 
 def summarize(plan, plan_path):
     out = ROOT / plan["salida"]
-    for job in plan["trabajos"]:
-        folder = out / job["id"]
-        if len(list(folder.glob("seed_*/results.csv"))) >= 2:
-            with open(folder / "resumen_semillas.log", "w", encoding="utf-8") as log:
-                subprocess.run([sys.executable, "agregar_semillas.py", str(folder)], cwd=ROOT,
-                               stdout=log, stderr=subprocess.STDOUT)
-    subprocess.run([sys.executable, "informe_plan.py", str(plan_path)], cwd=ROOT)
+    if plan.get("script", DEFAULT_SCRIPT) == DEFAULT_SCRIPT:  # agregar_semillas.py solo entiende ese formato
+        for job in plan["trabajos"]:
+            folder = out / job["id"]
+            if len(list(folder.glob("seed_*/results.csv"))) >= 2:
+                with open(folder / "resumen_semillas.log", "w", encoding="utf-8") as log:
+                    subprocess.run([sys.executable, "agregar_semillas.py", str(folder)], cwd=ROOT,
+                                   stdout=log, stderr=subprocess.STDOUT)
+    subprocess.run([sys.executable, plan.get("informe", DEFAULT_REPORT), str(plan_path)], cwd=ROOT)
 
 
 def main(argv=None):

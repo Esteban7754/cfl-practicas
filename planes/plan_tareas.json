@@ -1,0 +1,25 @@
+{
+  "nombre": "plan_tareas",
+  "descripcion": "Protocolo de 5 tareas de 20 clases (docs/plan_cinco_tareas.md): las 5 configuraciones de replay acordadas, 3 semillas, memoria fija de 0/10/20 %. Orden = prioridad.",
+  "script": "cfl_tareas.py",
+  "informe": "informe_tareas.py",
+  "salida": "resultados/plan_tareas",
+  "paralelo": 2,
+  "comun": ["--audit"],
+  "fase1": {
+    "iid": [],
+    "dir05": ["--partition", "dirichlet"]
+  },
+  "trabajos": [
+    {"id": "equilibrados", "titulo": "Lotes equilibrados, fracción (t-1)/t", "fase1": "iid", "semillas": [42, 43, 44],
+     "args": ["--metodo", "balanced", "--buffers", "0", "10", "20", "--joint"]},
+    {"id": "normal", "titulo": "Mezcla normal", "fase1": "iid", "semillas": [42, 43, 44],
+     "args": ["--metodo", "concat", "--buffers", "0", "10", "20"]},
+    {"id": "er_ace", "titulo": "ER-ACE adaptado", "fase1": "iid", "semillas": [42, 43, 44],
+     "args": ["--metodo", "ace", "--buffers", "0", "10", "20"]},
+    {"id": "calendario", "titulo": "Calendario 0,75-0,5-0,25-0,25-0,25", "fase1": "iid", "semillas": [42, 43, 44],
+     "args": ["--metodo", "calendario", "--buffers", "0", "10", "20"]},
+    {"id": "dir05_equilibrados", "titulo": "Dirichlet 0,5, lotes equilibrados", "fase1": "dir05", "semillas": [42, 43, 44],
+     "args": ["--metodo", "balanced", "--buffers", "0", "10", "20"]}
+  ]
+}
