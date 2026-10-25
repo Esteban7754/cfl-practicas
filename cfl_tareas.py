@@ -12,10 +12,18 @@ se copian a config.json; la línea de órdenes solo expone variables de diseño:
   --partition dirichlet reparto desigual por clases (α = FIJOS["dirichlet_alpha"]).
   --quick               prueba funcional mínima; no sirve para comparar.
 
-Estado: fases 1-2 del plan (datos por tareas, memoria y evaluación). El bucle de tareas llega en la fase 3.
+Cada buffer parte de los mismos pesos tras la primera tarea, con la misma semilla y el mismo
+número de pasos por ronda (``épocas · ceil(n_tarea / lote)``), sea cual sea la memoria.
+Tras la última tarea se evalúan también WA y cRT sobre el mismo modelo (columnas wa_*, crt_*).
+
+Salidas: results.csv (una fila por buffer), matriz.csv (precisión de cada tarea tras cada tarea),
+history.csv (por ronda) y, con --joint, joint_results.csv.
 """
 
 import argparse
+import copy
+import csv
+import gc
 import json
 import os
 from datetime import datetime
@@ -24,6 +32,7 @@ from pathlib import Path
 import torch
 
 import fl_core
+from cifar100_sampling import balanced_order
 from datasets_cfl import DATASETS, get_spec, use_preloaded_data
 from memoria_cfl import ClientMemory, memory_capacity
 from reproducibility import environment_info, seed_everything
@@ -105,6 +114,9 @@ class TaskExperiment:
         self.device = config["device"]
         self.tasks = config["tasks"]
         self.preprocess = fl_core.Preprocess(normalize=config["normalize"], mean=spec.mean, std=spec.std)
+        self.audit = {"training": [], "memory": {}}
+        self.context = {}
+        self.history, self.matrix = [], []
 
     # ---------------------------------------------------------- datos
     def split_by_task(self, x, y, limit, seed):
@@ -184,11 +196,256 @@ class TaskExperiment:
                                                       group_a_classes=old)["pred_share_b_percent"]
         return out
 
+    # ---------------------------------------------------------- entrenamiento
+    def new_model(self, state=None):
+        model = fl_core.get_model(self.spec.num_classes).to(self.device)
+        if state is not None:
+            model.load_state_dict(state)
+        return model
+
+    def local_round(self, global_model, batches_for_client, generator, size_of, ace_new_classes=None,
+                    classifier_only=False, audit=True):
+        """Una ronda federada. ``size_of(cliente)`` = muestras que aporta; con 0 no entrena ni se promedia.
+
+        En IID FedAvg no pondera (clientes iguales); con Dirichlet pondera por tamaño.
+        """
+        weights, sizes = [], []
+        for client in range(self.config["num_clients"]):
+            size = size_of(client)
+            if size == 0:
+                continue
+            self.context["client"] = client
+            record = {} if self.args.audit and audit else None
+            weights.append(fl_core.train_local(
+                self.new_model(global_model.state_dict()), batches_for_client(client), self.config["lr"], self.device,
+                self.preprocess, augment=self.config["augment"], generator=generator, record=record,
+                ace_new_classes=ace_new_classes, classifier_only=classifier_only))
+            sizes.append(size)
+            if record is not None:
+                record.pop("batch_losses")
+                self.audit["training"].append({"context": dict(self.context), **record})
+        if weights:
+            global_model.load_state_dict(fl_core.fedavg(weights, sizes if self.config["partition"] == "dirichlet" else None))
+
+    def steps(self, client, t):
+        """Pasos por ronda en la tarea t: los de recorrer sus datos ``local_epochs`` veces, con o sin memoria."""
+        return fl_core.steps_per_epoch(len(self.train[client][t][1]), self.config["batch_size"]) * self.config["local_epochs"]
+
+    def first_task(self):
+        """Primera tarea: se entrena una vez y todos los buffers parten de estos pesos."""
+        cfg = self.config
+        print(f"\n=== TAREA 1/{len(self.tasks)} (común a todos los buffers) ===")
+        model = self.new_model()
+        if self.args.phase1_checkpoint:
+            model.load_state_dict(torch.load(self.args.phase1_checkpoint, map_location=self.device, weights_only=True))
+            print(f"[INFO] Primera tarea reutilizada de: {self.args.phase1_checkpoint}")
+        else:
+            generator = torch.Generator().manual_seed(cfg["seed"])
+            for r in range(cfg["rounds_per_task"]):
+                self.context = {"task": 1, "round": r + 1}
+                self.local_round(model, lambda c: fl_core.concat_batches(
+                    *self.train[c][0], None, None, cfg["batch_size"], cfg["local_epochs"], generator=generator),
+                    generator, size_of=lambda c: len(self.train[c][0][1]))
+                acc = self.evaluate_tasks(model, 0)["acc_seen"]
+                print(f"Tarea 1 - Ronda {r + 1}/{cfg['rounds_per_task']} -> {acc:.2f}%")
+        self.base_weights = copy.deepcopy(model.state_dict())
+        self.base_eval = self.evaluate_tasks(model, 0)
+        print(f"[INFO] Precisión en la tarea 1 antes de continuar: {self.base_eval['acc_seen']:.2f}%")
+        if self.args.only_phase1:
+            torch.save(model.state_dict(), "phase1_checkpoint.pt")
+
+    def batches(self, method, client, t, r, memory, generator):
+        """Lotes de un cliente en la ronda r de la tarea t (desde 0) según el método."""
+        cfg = self.config
+        x, y = self.train[client][t]
+        steps = self.steps(client, t)
+        if memory is None:  # sin replay
+            return fl_core.concat_batches(x, y, None, None, cfg["batch_size"], cfg["local_epochs"], max_steps=steps,
+                                          generator=generator)
+        if method == "concat":
+            return fl_core.concat_batches(x, y, *memory, cfg["batch_size"], cfg["local_epochs"], max_steps=steps,
+                                          generator=generator)
+        fraction = cfg["calendario"][r] if method == "calendario" else t / (t + 1)  # antiguas / vistas
+        if method == "ace":
+            return fl_core.mixed_batches(x, y, *memory, cfg["batch_size"], steps, fraction, generator, with_origin=True)
+        return fl_core.mixed_batches(x, y, *memory, cfg["batch_size"], steps, fraction, generator)
+
+    def ace_memory(self, memory, client, t):
+        """Memoria de ER-ACE: la memoria de clases antiguas más otras tantas imágenes de la tarea actual.
+
+        En ER-ACE la memoria también guarda la tarea actual; sin ella, nada empuja las clases nuevas por
+        encima de las antiguas. Esas imágenes ya están en el cliente: no cuesta memoria de tareas pasadas.
+        """
+        x, y = self.train[client][t]
+        if len(y) == 0:  # Dirichlet: el cliente no tiene esta tarea y no entrena
+            return memory
+        idx = torch.as_tensor(balanced_order(y.tolist(), self.config["seed"] + 7 + client)[:len(memory[1])])
+        return torch.cat([memory[0], x[idx]]), torch.cat([memory[1], y[idx]])
+
+    def record_task(self, percent, t, result):
+        for i, acc in enumerate(result["per_task"]):
+            self.matrix.append({"buffer": percent, "tras_tarea": t + 1, "tarea": i + 1, "acc": acc})
+        write_csv("matriz.csv", self.matrix)
+
+    def run_buffer(self, percent):
+        """Tareas 2..T con una memoria de ``percent`` %; devuelve la fila de results.csv."""
+        cfg, method, last = self.config, self.config["metodo"], len(self.tasks) - 1
+        seed_everything(cfg["seed"])
+        print(f"\n=== BUFFER {percent} % ({method}) ===")
+        model = self.new_model(copy.deepcopy(self.base_weights))
+        memories = self.new_memories(percent)
+        for client, memory in memories.items():
+            memory.add_task(*self.train[client][0])
+        evals = [self.base_eval]
+        self.record_task(percent, 0, self.base_eval)
+        generator = torch.Generator().manual_seed(cfg["seed"] + 1)
+        for t in range(1, len(self.tasks)):
+            stored = {c: m.tensors() for c, m in memories.items()}
+            ace = method == "ace" and percent > 0  # sin memoria, ER-ACE es entropía cruzada normal
+            if ace:
+                stored = {c: None if m is None else self.ace_memory(m, c, t) for c, m in stored.items()}
+            for r in range(cfg["rounds_per_task"]):
+                self.context = {"buffer": percent, "task": t + 1, "round": r + 1}
+                self.local_round(model, lambda c: self.batches(method, c, t, r, stored[c], generator), generator,
+                                 size_of=lambda c: len(self.train[c][t][1]),
+                                 ace_new_classes=self.tasks[t] if ace else None)
+                result = self.evaluate_tasks(model, t)
+                print(f"Tarea {t + 1} - Ronda {r + 1}/{cfg['rounds_per_task']} -> vistas {result['acc_seen']:.2f}% | "
+                      + " ".join(f"T{i + 1} {a:.1f}" for i, a in enumerate(result["per_task"])))
+                self.history.append({"buffer": percent, "tarea": t + 1, "ronda": r + 1, "acc_vistas": result["acc_seen"],
+                                     **{f"acc_t{i + 1}": a for i, a in enumerate(result["per_task"])}})
+                write_csv("history.csv", self.history)
+            evals.append(result)
+            self.record_task(percent, t, result)
+            if t < last:  # la memoria tras la última tarea ya no se usa para entrenar
+                for client, memory in memories.items():
+                    memory.add_task(*self.train[client][t])
+        self.audit["memory"][str(percent)] = [{"client": c, "capacity": m.capacity, "size": m.size()}
+                                              for c, m in memories.items()]
+        row = self.summary(percent, evals, memories)
+        row.update(self.post_hoc(model, memories, percent))
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return row
+
+    def summary(self, percent, evals, memories):
+        """Métricas de aprendizaje continuo a partir de las evaluaciones tras cada tarea."""
+        last = len(evals) - 1
+        R = [e["per_task"] for e in evals]
+        old = range(last)
+        quotas = [n for m in memories.values() for n in m.quotas().values()]
+        return {
+            "buffer": percent, "metodo": self.config["metodo"],
+            "acc_final": evals[-1]["acc_seen"],
+            "acc_incremental_media": sum(e["acc_seen"] for e in evals) / len(evals),
+            "bwt": sum(R[last][i] - R[i][i] for i in old) / last,
+            "olvido_medio": sum(max(R[t][i] for t in range(i, last)) - R[last][i] for i in old) / last,
+            "acc_t1_final": R[last][0], f"acc_t{last + 1}_final": R[last][last],
+            "acc_t1_inicial": R[0][0],
+            "pred_nuevas_en_antiguas": evals[-1]["pred_new_on_old"],
+            "memoria_total": sum(m.size() for m in memories.values()),
+            "memoria_por_clase_final": sum(quotas) / len(quotas) if quotas else 0,
+        }
+
+    def post_hoc(self, model, memories, percent):
+        """Correcciones del clasificador sobre el modelo final; no cambian el entrenamiento.
+
+        WA: antiguas = tareas 1..T-1, nuevas = tarea T. cRT: la capa final reentrenada (resto congelado)
+        con la memoria y el mismo número de imágenes de la última tarea en cada cliente.
+        """
+        cfg, last, out = self.config, len(self.tasks) - 1, {}
+
+        def summary(prefix, state):
+            result = self.evaluate_tasks(self.new_model(state), last)
+            out.update({f"{prefix}acc_final": result["acc_seen"], f"{prefix}acc_t1_final": result["per_task"][0],
+                        f"{prefix}acc_t{last + 1}_final": result["per_task"][last]})
+
+        old = [c for task in self.tasks[:last] for c in task]
+        aligned, out["wa_gamma"] = fl_core.weight_align(model.state_dict(), old, self.tasks[last])
+        summary("wa_", aligned)
+        print(f"[WA] gamma = {out['wa_gamma']:.3f} -> final {out['wa_acc_final']:.2f}%")
+        if percent > 0 and cfg["crt_epochs"] > 0:
+            crt = self.new_model(model.state_dict())
+            generator = torch.Generator().manual_seed(cfg["seed"] + 3)
+
+            def balanced_set(client):
+                stored, (x, y) = memories[client].tensors(), self.train[client][last]
+                if stored is None or len(y) == 0:
+                    return None
+                idx = torch.randperm(len(y), generator=generator)[:len(stored[1])]
+                return torch.cat([stored[0], x[idx]]), torch.cat([stored[1], y[idx]])
+
+            sets = {c: balanced_set(c) for c in range(cfg["num_clients"])}
+            self.local_round(crt, lambda c: fl_core.concat_batches(*sets[c], None, None, cfg["batch_size"],
+                                                                   cfg["crt_epochs"], generator=generator),
+                             generator, size_of=lambda c: 0 if sets[c] is None else len(sets[c][1]),
+                             classifier_only=True, audit=False)
+            summary("crt_", crt.state_dict())
+            print(f"[cRT] final {out['crt_acc_final']:.2f}%")
+        return out
+
+    def joint(self):
+        """Referencia conjunta: todas las clases a la vez desde cero, con el mismo presupuesto.
+
+        Mismas rondas en total (tareas × rondas por tarea) y, en cada ronda, los pasos de una tarea media.
+        """
+        cfg = self.config
+        seed_everything(cfg["seed"])
+        rounds = len(self.tasks) * cfg["rounds_per_task"]
+        print(f"\n=== REFERENCIA: TODAS LAS CLASES A LA VEZ ({rounds} rondas) ===")
+        data = {c: (torch.cat([x for x, _ in tasks]), torch.cat([y for _, y in tasks])) for c, tasks in self.train.items()}
+        model = self.new_model()
+        generator = torch.Generator().manual_seed(cfg["seed"] + 2)
+        for r in range(rounds):
+            self.context = {"phase": "joint", "round": r + 1}
+            self.local_round(model, lambda c: fl_core.concat_batches(
+                *data[c], None, None, cfg["batch_size"], cfg["local_epochs"],
+                max_steps=fl_core.steps_per_epoch(len(data[c][1]) // len(self.tasks), cfg["batch_size"]) * cfg["local_epochs"],
+                generator=generator), generator, size_of=lambda c: len(data[c][1]), audit=False)
+        result = self.evaluate_tasks(model, len(self.tasks) - 1)
+        print(f"[CONJUNTO] {result['acc_seen']:.2f}%")
+        return {"rounds": rounds, "acc_final": result["acc_seen"],
+                **{f"acc_t{i + 1}": a for i, a in enumerate(result["per_task"])}}
+
     # ---------------------------------------------------------- ejecución
     def run(self):
         self.load_data()
-        print("[INFO] Fase 1 del plan: datos y configuración listos. El bucle de tareas llega en la fase 3.")
-        return []
+        self.first_task()
+        if self.args.only_phase1:
+            print("[INFO] Primera tarea guardada en phase1_checkpoint.pt; no se continúa.")
+            return []
+        results = [self.run_buffer(percent) for percent in self.config["buffers"]]
+        if self.args.joint:
+            joint = self.joint()
+            write_csv("joint_results.csv", [joint])
+            for row in results:
+                row["gap_vs_joint"] = joint["acc_final"] - row["acc_final"]
+        write_csv("results.csv", results)
+        if self.args.audit:
+            Path("audit.json").write_text(json.dumps(self.audit, indent=2), encoding="utf-8")
+        print_table(results)
+        return results
+
+
+def write_csv(path, rows):
+    fields = list(dict.fromkeys(key for row in rows for key in row))
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def print_table(results):
+    fmt = lambda v: "—" if v is None else f"{v:.2f}"  # noqa: E731
+    last = next(k for k in results[0] if k.startswith("acc_t") and k.endswith("_final") and k != "acc_t1_final")
+    print(f"\n{'Buffer':>7} | {'Final':>6} | {'Incr.':>6} | {'BWT':>7} | {'Olvido':>6} | {'T1':>6} | {'Últ.':>6} | "
+          f"{'WA':>6} | {'cRT':>6}")
+    for r in results:
+        print(f"{r['buffer']:>6}% | {fmt(r['acc_final']):>6} | {fmt(r['acc_incremental_media']):>6} | {fmt(r['bwt']):>7} | "
+              f"{fmt(r['olvido_medio']):>6} | {fmt(r['acc_t1_final']):>6} | {fmt(r[last]):>6} | "
+              f"{fmt(r['wa_acc_final']):>6} | {fmt(r.get('crt_acc_final')):>6}")
+    print("Final = todas las clases tras la última tarea; Incr. = media tras cada tarea; Últ. = última tarea.")
 
 
 def main(argv=None):
