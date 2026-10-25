@@ -86,10 +86,11 @@ class TaskDataTests(unittest.TestCase):
             self.assertEqual(memory.capacity, 20 * samples // 500)
             memory.add_task(*experiment.train[client][0])
             self.assertTrue(set(memory.tensors()[1].tolist()) <= set(spec.tasks()[0]))
-        result = experiment.evaluate_tasks(fl_core.get_model(), 2)
+        model = fl_core.get_model().to(experiment.device)  # en GPU, el modelo debe estar en el mismo dispositivo
+        result = experiment.evaluate_tasks(model, 2)
         self.assertEqual(len(result["per_task"]), 3)
         self.assertTrue(0 <= result["pred_new_on_old"] <= 100)
-        self.assertIsNone(experiment.evaluate_tasks(fl_core.get_model(), 0)["pred_new_on_old"])
+        self.assertIsNone(experiment.evaluate_tasks(model, 0)["pred_new_on_old"])
 
     def read_csv(self, path):
         with open(path, encoding="utf-8") as handle:
