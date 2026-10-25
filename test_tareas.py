@@ -68,6 +68,31 @@ class TaskDataTests(unittest.TestCase):
             for client in experiment.train.values():
                 self.assertTrue(set(client[t][1].tolist()) <= set(classes))
 
+    def test_memories_and_task_evaluation(self):
+        import cfl_tareas
+        import fl_core
+
+        args = cfl_tareas.build_parser().parse_args(["--quick"])
+        config, spec = cfl_tareas.resolve_config(args, cfl_tareas.build_parser())
+        experiment = cfl_tareas.TaskExperiment(args, config, spec)
+        cwd, tmp = os.getcwd(), tempfile.mkdtemp()
+        os.chdir(tmp)
+        try:
+            with mock.patch("flwr_datasets.FederatedDataset", FakeFederatedDataset):
+                experiment.load_data()
+        finally:
+            os.chdir(cwd)
+        memories = experiment.new_memories(20)
+        for client, memory in memories.items():
+            samples = sum(len(y) for _, y in experiment.train[client])
+            self.assertEqual(memory.capacity, 20 * samples // 500)
+            memory.add_task(*experiment.train[client][0])
+            self.assertTrue(set(memory.tensors()[1].tolist()) <= set(spec.tasks()[0]))
+        result = experiment.evaluate_tasks(fl_core.get_model(), 2)
+        self.assertEqual(len(result["per_task"]), 3)
+        self.assertTrue(0 <= result["pred_new_on_old"] <= 100)
+        self.assertIsNone(experiment.evaluate_tasks(fl_core.get_model(), 0)["pred_new_on_old"])
+
     def test_config_records_fixed_hyperparameters(self):
         import cfl_tareas
 

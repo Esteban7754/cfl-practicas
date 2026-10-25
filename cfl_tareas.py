@@ -12,7 +12,7 @@ se copian a config.json; la línea de órdenes solo expone variables de diseño:
   --partition dirichlet reparto desigual por clases (α = FIJOS["dirichlet_alpha"]).
   --quick               prueba funcional mínima; no sirve para comparar.
 
-Estado: fase 1 del plan (datos por tareas y configuración). El bucle de tareas llega en la fase 3.
+Estado: fases 1-2 del plan (datos por tareas, memoria y evaluación). El bucle de tareas llega en la fase 3.
 """
 
 import argparse
@@ -25,6 +25,7 @@ import torch
 
 import fl_core
 from datasets_cfl import DATASETS, get_spec, use_preloaded_data
+from memoria_cfl import ClientMemory, memory_capacity
 from reproducibility import environment_info, seed_everything
 
 # Hiperparámetros del protocolo: no se cambian por línea de órdenes (acuerdo del 25/10/2026).
@@ -152,6 +153,36 @@ class TaskExperiment:
         print(f"[DATA] {len(self.tasks)} tareas de {len(self.tasks[0])} clases; "
               f"imágenes de entrenamiento por tarea: {manifest['total_per_task']}")
         return manifest
+
+    # ---------------------------------------------------------- memoria
+    def new_memories(self, percent):
+        """Memoria vacía de cada cliente con capacidad fija: ``percent`` % de una tarea media del cliente."""
+        memories = {}
+        for client, tasks in self.train.items():
+            samples = sum(len(y) for _, y in tasks)
+            memories[client] = ClientMemory(memory_capacity(percent, samples, len(self.tasks)),
+                                            self.config["seed"], client, self.spec.num_classes)
+        return memories
+
+    # ---------------------------------------------------------- evaluación
+    def seen_test(self, t):
+        """Test de las tareas 0..t juntas."""
+        return torch.cat([x for x, _ in self.test[:t + 1]]), torch.cat([y for _, y in self.test[:t + 1]])
+
+    def evaluate_tasks(self, model, t):
+        """Precisión (argmax sobre todas las salidas) en cada tarea vista y en todas juntas tras la tarea t.
+
+        ``pred_new_on_old``: % de predicciones de la tarea t sobre el test de las anteriores (sesgo hacia lo reciente).
+        """
+        per_task = [fl_core.evaluate(model, x, y, self.device, self.preprocess)["accuracy_percent"]
+                    for x, y in self.test[:t + 1]]
+        seen = fl_core.evaluate(model, *self.seen_test(t), self.device, self.preprocess)
+        out = {"per_task": per_task, "acc_seen": seen["accuracy_percent"], "pred_new_on_old": None}
+        if t > 0:
+            old = [c for task in self.tasks[:t] for c in task]
+            out["pred_new_on_old"] = fl_core.evaluate(model, *self.seen_test(t - 1), self.device, self.preprocess,
+                                                      group_a_classes=old)["pred_share_b_percent"]
+        return out
 
     # ---------------------------------------------------------- ejecución
     def run(self):
