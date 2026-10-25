@@ -34,7 +34,15 @@ Precisión en % (media ± desviación típica entre semillas). Antes de aprender
 5. **Con datos desiguales (Dirichlet α = 0,5 y 0,1)** los lotes equilibrados siguen ganando (+2,2 a +4,5 puntos), con más coste en B. Con Dirichlet la retención puede pasar del 100 %, así que se comparan precisiones absolutas.
 6. **Reproducibilidad:** en la misma GPU los resultados son idénticos. Entre RTX 5050 y 2 × T4 (Kaggle), con la semilla 42 y 12 configuraciones, la diferencia media es de 0,45 puntos (máx. 0,86), menor que la variación entre semillas.
 
-### Siguiente paso: extensión B
+### En curso: protocolo de 5 tareas (25 de octubre de 2026)
+
+Tras revisar el estudio con el profesor se pasa a **5 tareas de 20 clases** con hiperparámetros fijos y solo las 5 configuraciones más prometedoras: mezcla normal, lotes equilibrados, calendario, ER-ACE y lotes equilibrados con Dirichlet α = 0,5. La memoria de cada cliente tiene un tamaño fijo (10 o 20 % de una tarea, es decir 1 000 o 2 000 imágenes en total) repartido entre las clases vistas, y la fracción de memoria por lote es (t−1)/t.
+
+- Diseño y fases: [docs/plan_cinco_tareas.md](docs/plan_cinco_tareas.md). Variables y métricas: [docs/variables.md](docs/variables.md).
+- Código: `cfl_tareas.py` (experimento), `memoria_cfl.py` (memoria por clases), `datasets_cfl.py` (datasets), `informe_tareas.py` (informe). El estudio de 2 tareas (`cifar100_three_buffer.py`) no cambia.
+- Estado: código terminado y probado con `planes/plan_prueba_tareas.json`. Falta el piloto en GPU (semilla 42, `equilibrados`) y el plan completo `planes/plan_tareas.json` (21 tareas, ~1 día de GPU, estimación sin medir). Si todo va bien, después se probará con Tiny-ImageNet.
+
+### Después: extensión B
 
 Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por clase de los clientes (en la línea de CCVR, aplicado a tareas secuenciales). Plan por pasos con punto de decisión temprano en [docs/extension_calibracion_servidor.md](docs/extension_calibracion_servidor.md). Línea base a batir: calendario + cRT (49,2 %); margen hasta la referencia ×2 (60,1 %).
 
@@ -45,7 +53,8 @@ Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por c
 ## 2. Guía rápida para agentes
 
 - **Ejecuta siempre en Docker.** En el equipo del autor (Windows), el Python nativo no puede cargar `torch.dll` (bloqueado por Control de aplicaciones) y no hay `python` en el PATH. Todo comando de Python va por `.\run.ps1 ...` (o `.\run.ps1 -dev ...` para usar el código de la carpeta sin reconstruir la imagen).
-- **Tests antes de cambiar nada que importe:** `.\run.ps1 -dev tests` (58 tests, unos 4 min en CPU, 74 s en GPU con `.\run.ps1 -gpu tests` tras reconstruir).
+- **Tests antes de cambiar nada que importe:** `.\run.ps1 -cpu -dev tests` (83 tests, unos 10 min en CPU; `-dev` no está disponible con la imagen GPU). Solo el protocolo de 5 tareas: `.\run.ps1 -cpu -dev tests test_memoria test_tareas test_plan`.
+- **Protocolo de 5 tareas (`cfl_tareas.py`):** los hiperparámetros están en `FIJOS` y no se exponen por línea de órdenes; no los añadas como opciones sin decidirlo con el autor. La memoria debe seguir siendo de tamaño fijo, anidada entre buffers y sin recuperar imágenes descartadas (`test_memoria.py` lo comprueba).
 - **Invariantes del protocolo que no se deben romper sin decidirlo explícitamente:**
   - `--controlled-replay` (por defecto): mismos pesos de partida, buffers anidados y equilibrados por clase, mismos pasos por ronda para cualquier buffer.
   - `--buffers` **debe incluir el 0** (es la referencia de cada ejecución).
@@ -101,7 +110,18 @@ Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por c
 
 `kaggle_plan.ipynb` clona el repositorio en un commit fijo (`COMMIT = "6ceab93"`), ejecuta `planes/plan_prueba.json` y después `planes/plan_kaggle.json` (el plan con la semilla 42) y empaqueta `resultados_kaggle.tar.gz` sin los `.pt`. **Ese commit es anterior a la corrección de ER-ACE (67b2740):** actualiza `COMMIT` antes de reutilizarlo. Sesión con GPU T4 ×2 e Internet activado; el plan con la semilla 42 tarda unas 6 h 40 min.
 
-### 4.4 Un experimento suelto
+### 4.4 Protocolo de 5 tareas
+
+```powershell
+.\run.ps1 -cpu -dev plan planes/plan_prueba_tareas.json   # miniatura (--quick), unos 20 min en CPU
+.\run.ps1 -gpu construir                                 # la imagen GPU no lee la carpeta: reconstruir tras cada commit
+.\vigilar_gpu.ps1 -Plan planes/plan_tareas.json -Paralelo 2   # plan completo con recuperación de cuelgues
+.\run.ps1 -cpu -dev python cfl_tareas.py --quick --metodo balanced --joint   # un experimento suelto
+```
+
+El informe queda en `resultados/<plan>/INFORME.md`, con la curva incremental y la matriz R en `informe/`.
+
+### 4.5 Un experimento suelto
 
 ```powershell
 .\run.ps1 python cifar100_three_buffer.py --buffers 0 10 20 --replay-mix balanced --loss ace --seed 42 --local-epochs 5 --rounds 5
@@ -172,6 +192,8 @@ Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por c
 |---|---|
 | `cifar100_three_buffer.py` | Experimento principal (fases, buffers, variantes, correcciones, referencia conjunta, auditoría) |
 | `fl_core.py` | Modelo, FedAvg, entrenamiento local, pérdidas (LwF, ACE), lotes de replay, WA, evaluación y preprocesado |
+| `cfl_tareas.py`, `memoria_cfl.py`, `datasets_cfl.py` | Protocolo de 5 tareas: experimento, memoria fija por clases y especificación de datasets |
+| `informe_tareas.py` | `INFORME.md` y gráficas de un plan de 5 tareas |
 | `cifar100_sampling.py`, `cifar100_validation.py` | Muestreo equilibrado por clase y contrato de validación del punto de control de la fase 1 |
 | `plan_experimentos.py` | Orquestador de planes: fase 1 compartida, tareas en paralelo, reparto entre GPUs, reanudación, límite de tiempo |
 | `informe_plan.py` | Genera `INFORME.md` y las gráficas de un plan |
@@ -238,3 +260,4 @@ Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por c
 | 10 de octubre | Corrección de ER-ACE (memoria con A y B; máscara por origen) |
 | 11-13 de octubre | Plan completo en la RTX 5050 (56 tareas); vigilante de cuelgues |
 | 13 de octubre | Borrador del artículo con todos los resultados |
+| 25 de octubre | Revisión con el profesor: protocolo de 5 tareas de 20 clases, hiperparámetros fijos, 5 configuraciones; código y plan listos |
