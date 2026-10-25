@@ -24,6 +24,7 @@ import argparse
 import copy
 import csv
 import gc
+import hashlib
 import json
 import os
 from datetime import datetime
@@ -58,6 +59,28 @@ QUICK = {"num_clients": 2, "local_epochs": 1, "rounds_per_task": 1,
          "train_samples_per_task": 100, "test_samples_per_task": 100}
 
 METODOS = ("concat", "balanced", "calendario", "ace")
+
+# Claves que deben coincidir entre la ejecución y el checkpoint de la primera tarea que reutiliza.
+CONTRATO = ("dataset", "dataset_revision", "tasks", "num_clients", "batch_size", "local_epochs", "rounds_per_task",
+            "lr", "seed", "partition", "dirichlet_alpha", "normalize", "augment", "train_samples_per_task")
+
+
+def checkpoint_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def validate_checkpoint(config, checkpoint, parser):
+    """El checkpoint debe venir con su manifiesto, coincidir en CONTRATO y en su SHA-256."""
+    manifest_path = checkpoint.with_suffix(".config.json")
+    if not manifest_path.is_file():
+        parser.error(f"El checkpoint necesita su manifiesto {manifest_path.name}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    differences = [key for key in CONTRATO if config.get(key) != manifest.get(key)]
+    if differences:
+        parser.error("El checkpoint de la primera tarea no coincide en: " + ", ".join(differences))
+    if manifest.get("checkpoint_sha256") != checkpoint_sha256(checkpoint):
+        parser.error("El manifiesto no corresponde al SHA-256 de este checkpoint")
+    return manifest
 
 
 def parse_percent(value):
@@ -105,6 +128,8 @@ def resolve_config(args, parser):
                   dirichlet_alpha=config["dirichlet_alpha"] if args.partition == "dirichlet" else None,
                   joint=args.joint, quick=args.quick,
                   device="cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+    if args.phase1_checkpoint:
+        config["phase1_manifest"] = validate_checkpoint(config, args.phase1_checkpoint, parser)
     return config, spec
 
 
@@ -252,7 +277,16 @@ class TaskExperiment:
         self.base_eval = self.evaluate_tasks(model, 0)
         print(f"[INFO] Precisión en la tarea 1 antes de continuar: {self.base_eval['acc_seen']:.2f}%")
         if self.args.only_phase1:
-            torch.save(model.state_dict(), "phase1_checkpoint.pt")
+            self.save_checkpoint(model)
+
+    def save_checkpoint(self, model):
+        """Guarda los pesos de la primera tarea con su manifiesto, para reutilizarlos con trazabilidad."""
+        torch.save(model.state_dict(), "phase1_checkpoint.pt")
+        manifest = {key: self.config.get(key) for key in CONTRATO}
+        manifest.update(checkpoint_sha256=checkpoint_sha256("phase1_checkpoint.pt"),
+                        provenance=f"Generado por cfl_tareas.py el {datetime.now():%Y-%m-%d %H:%M}",
+                        task1_test_accuracy_percent=self.base_eval["acc_seen"], torch_version=torch.__version__)
+        Path("phase1_checkpoint.config.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     def batches(self, method, client, t, r, memory, generator):
         """Lotes de un cliente en la ronda r de la tarea t (desde 0) según el método."""

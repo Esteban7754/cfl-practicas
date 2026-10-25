@@ -123,6 +123,33 @@ class TaskDataTests(unittest.TestCase):
                     self.assertEqual(n, steps[(0, task, client)])
         self.assertEqual(len(set(no_replay.values())), 1)  # sin memoria, el método no cambia nada
 
+    def test_reusing_the_first_task_gives_the_same_results(self):
+        phase1 = self.run_experiment("--only-phase1")
+        checkpoint = phase1 / "phase1_checkpoint.pt"
+        manifest = json.loads((phase1 / "phase1_checkpoint.config.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["seed"], 42)
+        self.assertFalse((phase1 / "results.csv").exists())
+        args = ("--metodo", "balanced", "--buffers", "0", "20")
+        trained = self.read_csv(self.run_experiment(*args) / "results.csv")
+        reused = self.read_csv(self.run_experiment(*args, "--phase1-checkpoint", str(checkpoint)) / "results.csv")
+        self.assertEqual(trained, reused)
+
+    def test_checkpoint_from_another_setup_is_rejected(self):
+        phase1 = self.run_experiment("--only-phase1")
+        checkpoint = phase1 / "phase1_checkpoint.pt"
+        with self.assertRaises(SystemExit):  # otra semilla
+            self.run_experiment("--seed", "43", "--phase1-checkpoint", str(checkpoint), only_data=True)
+        with self.assertRaises(SystemExit):  # otro reparto
+            self.run_experiment("--partition", "dirichlet", "--phase1-checkpoint", str(checkpoint), only_data=True)
+        manifest_path = phase1 / "phase1_checkpoint.config.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_path.write_text(json.dumps({**manifest, "checkpoint_sha256": "0" * 64}), encoding="utf-8")
+        with self.assertRaises(SystemExit):  # pesos que no son los del manifiesto
+            self.run_experiment("--phase1-checkpoint", str(checkpoint), only_data=True)
+        manifest_path.unlink()
+        with self.assertRaises(SystemExit):  # sin manifiesto
+            self.run_experiment("--phase1-checkpoint", str(checkpoint), only_data=True)
+
     def test_config_records_fixed_hyperparameters(self):
         import cfl_tareas
 
