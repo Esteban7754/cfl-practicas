@@ -110,6 +110,8 @@ Calibrar el clasificador **en el servidor, sin buffer**, con estadísticas por c
 
 `kaggle_plan.ipynb` clona el repositorio en un commit fijo (`COMMIT = "6ceab93"`), ejecuta `planes/plan_prueba.json` y después `planes/plan_kaggle.json` (el plan con la semilla 42) y empaqueta `resultados_kaggle.tar.gz` sin los `.pt`. **Ese commit es anterior a la corrección de ER-ACE (67b2740):** actualiza `COMMIT` antes de reutilizarlo. Sesión con GPU T4 ×2 e Internet activado; el plan con la semilla 42 tarda unas 6 h 40 min.
 
+**Protocolo de 5 tareas en Kaggle:** `kaggle_tareas.ipynb` clona el commit `COMMIT`, pasa los tests y el plan en miniatura y ejecuta `planes/plan_tareas.json` **semilla a semilla** (`SEMILLAS`, por defecto 42 y 43), sin empezar tareas nuevas a partir de `HORAS` (9,5 h desde el inicio). Deja `resultados_kaggle_tareas.tar.gz` sin los `.pt`. Las semillas que falten van en otra sesión; los paquetes se combinan descomprimiéndolos en la misma carpeta y ejecutando `informe_tareas.py planes/plan_tareas.json`.
+
 ### 4.4 Protocolo de 5 tareas
 
 ```powershell
@@ -205,7 +207,8 @@ El informe queda en `resultados/<plan>/INFORME.md`, con la curva incremental y l
 | `Dockerfile`, `docker-compose.yml`, `docker/` | Imagen reproducible (CPU o CUDA, `TORCH_VARIANT`) con CIFAR-100 incluido; `entrypoint.sh` |
 | `verificar_cifar100.py` | Recalcula las métricas desde los pesos con un evaluador independiente (solo exacto en CPU) |
 | `agregar_semillas.py` | Media ± desviación entre semillas |
-| `kaggle_plan.ipynb`, `kaggle_experimento.ipynb` | Cuadernos de Kaggle (plan con la semilla 42; experimento suelto) |
+| `kaggle_tareas.ipynb` | Cuaderno de Kaggle del protocolo de 5 tareas (semilla a semilla, con límite de horas) |
+| `kaggle_plan.ipynb`, `kaggle_experimento.ipynb` | Cuadernos de Kaggle del estudio de 2 tareas (plan con la semilla 42; experimento suelto) |
 | `docs/extension_calibracion_servidor.md` | Diseño de la siguiente extensión |
 | `domainnet.py`, `mvtecad_all_experiments.py`, `experiment_common.py` | Experimentos secundarios (cambio de dominio, MVTec AD como clasificación) |
 | `legacy/`, `comparar_replay.ps1`, `repetir_semillas.ps1` | Scripts históricos y lanzadores antiguos, conservados por compatibilidad |
